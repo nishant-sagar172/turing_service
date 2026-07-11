@@ -1,0 +1,6 @@
+{
+  "__comment__": "Optional per-agent variable overrides. Copy to agent_variables.json (path set by AGENT_VARIABLES_FILE). Keys are Bolna agent_ids. By default EVERY {variable} in an agent's prompt is required; list ones here that may be omitted.",
+  "5bc97541-e320-4d95-a3a5-242cfe45621d": {
+    "optional": ["nickname", "preferred_time"]
+  }
+}

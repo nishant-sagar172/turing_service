@@ -1,0 +1,168 @@
+"""Thin async client for the Bolna voice AI API.
+
+Wraps a single shared ``httpx.AsyncClient`` configured with the base URL and
+Bearer auth. Bolna-specific endpoints are added as methods; a generic
+``request`` helper backs them and can be reused for endpoints we haven't
+wrapped yet.
+
+Docs: https://www.bolna.ai/docs — auth is ``Authorization: Bearer <API_KEY>``.
+Content type is set per-request by httpx: ``application/json`` when ``json=``
+is passed, ``multipart/form-data`` when ``files=``/``data=`` are passed.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+
+
+class BolnaError(Exception):
+    """Raised when Bolna returns a non-2xx response or is unreachable.
+
+    ``status_code`` is the upstream HTTP status (None on transport failure).
+    ``payload`` is the parsed upstream error body when available.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None,
+                 payload: Any | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.payload = payload
+
+
+class BolnaClient:
+    """Async wrapper around the Bolna REST API."""
+
+    def __init__(self, api_key: str, base_url: str = "https://api.bolna.ai",
+                 timeout: float = 30.0) -> None:
+        self._base_url = base_url.rstrip("/")
+        # NOTE: no default Content-Type — httpx picks JSON vs multipart per call.
+        self._client = httpx.AsyncClient(
+            base_url=self._base_url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
+        )
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    async def aclose(self) -> None:
+        """Close the underlying HTTP connection pool."""
+        await self._client.aclose()
+
+    async def request(self, method: str, path: str, *,
+                      json: Any | None = None,
+                      params: dict[str, Any] | None = None,
+                      data: dict[str, Any] | None = None,
+                      files: dict[str, Any] | None = None) -> Any:
+        """Perform an authenticated request and return the parsed JSON body.
+
+        Raises:
+            BolnaError: on transport failure or a non-2xx response.
+        """
+        try:
+            response = await self._client.request(
+                method, path, json=json, params=params, data=data, files=files,
+            )
+        except httpx.RequestError as exc:  # DNS, connection, timeout, etc.
+            raise BolnaError(
+                f"Failed to reach Bolna at {self._base_url}{path}: {exc}"
+            ) from exc
+
+        if response.is_error:
+            raise BolnaError(
+                f"Bolna returned {response.status_code} for {method} {path}",
+                status_code=response.status_code,
+                payload=_safe_json(response),
+            )
+
+        return _safe_json(response)
+
+    async def get_user(self) -> Any:
+        """GET /user/me — account info. Used as the connectivity probe."""
+        return await self.request("GET", "/user/me")
+
+    async def list_agents(self) -> Any:
+        """GET /v2/agent/all — list all agents on the account."""
+        return await self.request("GET", "/v2/agent/all")
+
+    async def get_agent(self, agent_id: str) -> Any:
+        """GET /v2/agent/{agent_id} — full agent config (read-only introspection)."""
+        return await self.request("GET", f"/v2/agent/{agent_id}")
+
+    async def list_phone_numbers(self) -> Any:
+        """GET /phone-numbers/all — numbers owned on the account (caller IDs)."""
+        return await self.request("GET", "/phone-numbers/all")
+
+    async def make_call(self, payload: dict[str, Any]) -> Any:
+        """POST /call — start (or schedule) a single outbound call."""
+        return await self.request("POST", "/call", json=payload)
+
+    async def stop_call(self, execution_id: str) -> Any:
+        """POST /call/{execution_id}/stop — cancel a queued/scheduled call."""
+        return await self.request("POST", f"/call/{execution_id}/stop")
+
+    async def get_execution(self, execution_id: str) -> Any:
+        """GET /executions/{execution_id} — status/transcript/outcome of a call."""
+        return await self.request("GET", f"/executions/{execution_id}")
+
+    async def create_batch(self, *, agent_id: str, csv_bytes: bytes,
+                           file_name: str = "recipients.csv",
+                           from_phone_numbers: str | None = None,
+                           retry_config: str | None = None,
+                           webhook_url: str | None = None) -> Any:
+        """POST /batches — create a batch by uploading a CSV (multipart).
+
+        ``from_phone_numbers`` and ``retry_config`` must already be
+        JSON-encoded strings (multipart form fields carry strings).
+        """
+        data: dict[str, Any] = {"agent_id": agent_id}
+        if from_phone_numbers is not None:
+            data["from_phone_numbers"] = from_phone_numbers
+        if retry_config is not None:
+            data["retry_config"] = retry_config
+        if webhook_url is not None:
+            data["webhook_url"] = webhook_url
+        files = {"file": (file_name, csv_bytes, "text/csv")}
+        return await self.request("POST", "/batches", data=data, files=files)
+
+    async def schedule_batch(self, batch_id: str, payload: dict[str, Any]) -> Any:
+        """POST /batches/{batch_id}/schedule — schedule a created batch.
+
+        Bolna's schedule endpoint expects multipart/form-data (NOT JSON), same
+        as create. Each field is sent as a form part via ``files={k:(None,v)}``.
+        """
+        form = {k: (None, str(v)) for k, v in payload.items()}
+        return await self.request(
+            "POST", f"/batches/{batch_id}/schedule", files=form,
+        )
+
+    async def list_agent_batches(self, agent_id: str) -> Any:
+        """GET /batches/{agent_id}/all — all batches for an agent."""
+        return await self.request("GET", f"/batches/{agent_id}/all")
+
+    async def get_batch(self, batch_id: str) -> Any:
+        """GET /batches/{batch_id} — batch status/details."""
+        return await self.request("GET", f"/batches/{batch_id}")
+
+    async def get_batch_executions(self, batch_id: str) -> Any:
+        """GET /batches/{batch_id}/executions — per-call results in a batch."""
+        return await self.request("GET", f"/batches/{batch_id}/executions")
+
+    async def stop_batch(self, batch_id: str) -> Any:
+        """POST /batches/{batch_id}/stop — halt a queued/running batch."""
+        return await self.request("POST", f"/batches/{batch_id}/stop")
+
+    async def delete_batch(self, batch_id: str) -> Any:
+        """DELETE /batches/{batch_id} — remove a batch."""
+        return await self.request("DELETE", f"/batches/{batch_id}")
+
+
+def _safe_json(response: httpx.Response) -> Any:
+    """Return parsed JSON, or the raw text wrapped in a dict if not JSON."""
+    try:
+        return response.json()
+    except ValueError:
+        return {"raw": response.text}

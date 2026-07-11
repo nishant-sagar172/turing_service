@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>turing × Kalaam — Voice Calling Integration Design</title>
+<style>
+  :root {
+    --ink: #14181f;
+    --muted: #5b6673;
+    --line: #d8dee6;
+    --accent: #2b5cff;
+    --accent-soft: #eef2ff;
+    --green: #0f8a4d;
+    --amber: #a86400;
+    --red: #c0392b;
+    --code-bg: #f5f7fa;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    font-size: 10.5pt;
+    line-height: 1.5;
+    margin: 0;
+  }
+  h1, h2, h3, h4 { line-height: 1.25; color: var(--ink); }
+  h2 { font-size: 15pt; border-bottom: 2px solid var(--accent); padding-bottom: 4px; margin-top: 26px; }
+  h3 { font-size: 12pt; margin-top: 18px; color: #22303f; }
+  h4 { font-size: 10.5pt; margin: 12px 0 4px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+  p { margin: 6px 0; }
+  a { color: var(--accent); text-decoration: none; }
+  code { font-family: "Consolas", "SF Mono", Menlo, monospace; font-size: 9pt; background: var(--code-bg); padding: 1px 4px; border-radius: 3px; }
+  pre { font-family: "Consolas", monospace; font-size: 8.6pt; background: var(--code-bg); border: 1px solid var(--line);
+        border-radius: 6px; padding: 12px; overflow: auto; line-height: 1.4; white-space: pre; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 9.2pt; }
+  th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #f0f3f8; font-weight: 600; }
+  ul, ol { margin: 6px 0 6px 0; padding-left: 20px; }
+  li { margin: 3px 0; }
+  .muted { color: var(--muted); }
+  .tag { display: inline-block; font-size: 8pt; font-weight: 700; padding: 1px 7px; border-radius: 999px; text-transform: uppercase; letter-spacing: .5px; }
+  .tag.ok { background: #e5f6ec; color: var(--green); }
+  .tag.warn { background: #fdf3e2; color: var(--amber); }
+  .tag.info { background: var(--accent-soft); color: var(--accent); }
+  .callout { border-left: 4px solid var(--accent); background: var(--accent-soft); padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 12px 0; }
+  .callout.warn { border-color: var(--amber); background: #fdf6ea; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .kv td:first-child { color: var(--muted); width: 34%; font-weight: 600; }
+  section { page-break-inside: auto; }
+  h2, h3 { page-break-after: avoid; }
+  pre, table, .callout, .card { page-break-inside: avoid; }
+  .page-break { page-break-before: always; }
+  @page { size: A4; margin: 16mm 15mm 18mm 15mm; }
+
+  /* Cover */
+  .cover { height: 250mm; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
+  .cover .eyebrow { color: var(--accent); font-weight: 700; letter-spacing: 2px; text-transform: uppercase; font-size: 10pt; }
+  .cover h1 { font-size: 30pt; margin: 8px 0 6px; }
+  .cover .sub { font-size: 13pt; color: var(--muted); margin-bottom: 30px; }
+  .cover .meta { border-top: 1px solid var(--line); padding-top: 16px; font-size: 10pt; }
+  .cover .meta table td { border: none; padding: 3px 0; }
+  .cover .meta td:first-child { color: var(--muted); width: 150px; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ COVER ═══════════════════ -->
+<div class="cover">
+  <div class="eyebrow">Engineering Design Document</div>
+  <h1>turing × Kalaam</h1>
+  <div class="sub">Standardized Voice-Calling Micro-service Integration (Bolna)</div>
+  <div class="meta">
+    <table>
+      <tr><td>Status</td><td><span class="tag warn">Integration idea Proposal</span></td></tr>
+      <tr><td>Version</td><td>0.1</td></tr>
+      <tr><td>Date</td><td>2026-07-09</td></tr>
+      <tr><td>Author</td><td>Nishant Kumar Sagar</td></tr>
+      <tr><td>Reviewers</td><td>Karitkey Sir</td></tr>
+      <tr><td>Systems</td><td>turing_service · Kalaam backend · kalam_frontend · Bolna (vendor)</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════ TOC ═══════════════════ -->
+<h2>Contents</h2>
+<ol>
+  <li>Overview &amp; Objectives</li>
+  <li>Goals &amp; Non-Goals</li>
+  <li>Systems &amp; Terminology</li>
+  <li>Confirmed Design Decisions</li>
+  <li>High-Level Architecture</li>
+  <li>End-to-End Sequence</li>
+  <li>Standardized Ingestion Contract</li>
+  <li>Component Design — turing_service</li>
+  <li>Component Design — Kalaam Backend</li>
+  <li>Component Design — kalam_frontend</li>
+  <li>Data Models</li>
+  <li>API Contracts</li>
+  <li>Security &amp; Compliance</li>
+  <li>Reliability, Idempotency &amp; Error Handling</li>
+  <li>Deployment &amp; Infrastructure</li>
+  <li>Testing &amp; Verification</li>
+  <li>Rollout Plan &amp; Milestones</li>
+  <li>Risks &amp; Mitigations</li>
+  <li>Open Questions for Reviewers</li>
+  <li>Out of Scope / Future Phases</li>
+</ol>
+
+<!-- ═══════════════════ 1 ═══════════════════ -->
+<section class="page-break">
+<h2>1. Overview &amp; Objectives</h2>
+<p><code>turing_service</code> (“turing”) is being standardized into a <strong>callable
+micro-service</strong> that any Docstribe platform can invoke to place outbound voice
+calls through the <strong>Bolna</strong> voice-AI API. <strong>Kalaam</strong> is the
+first consumer.</p>
+<p>A Kalaam operator opens an <strong>AI Voice Calling</strong> page and performs either a
+<strong>single send</strong> (one patient) or a <strong>campaign</strong> (many patients,
+selected with Kalaam’s existing task-management filter / “bucket” logic — identical to the
+Saheli/WhatsApp Send flow). They select a Bolna <strong>agent</strong>, fill the agent’s
+required variables, configure <strong>retries</strong>, and press Send. Kalaam’s backend
+calls turing over <strong>hidden, key-authenticated</strong> endpoints; turing places the
+calls on Bolna. As each call completes, Bolna notifies turing; turing persists the full
+record (status, transcript, recording, cost) in <strong>its own database</strong> and
+forwards a <strong>lean outcome</strong> to Kalaam, which stores it in <strong>new
+tables</strong> in the Kalaam database and links it to the patient.</p>
+</section>
+
+<!-- ═══════════════════ 2 ═══════════════════ -->
+<section>
+<h2>2. Goals &amp; Non-Goals</h2>
+<div class="grid2">
+  <div class="card">
+    <h4>Goals</h4>
+    <ul>
+      <li>turing exposes a stable, versionable, authenticated API for single + batch voice calls.</li>
+      <li>turing owns persistence: batches, calls, transcripts, request logs, basic metrics.</li>
+      <li>Per-agent variable validation (reject calls missing required variables).</li>
+      <li>Event-driven outcome pipeline: Bolna → turing → Kalaam callback.</li>
+      <li>Kalaam UI to select patients, agent, variables, retries; single &amp; campaign.</li>
+      <li>Kalaam stores a lean per-patient outcome + reference to turing.</li>
+    </ul>
+  </div>
+</div>
+</section>
+
+<!-- ═══════════════════ 3 ═══════════════════ -->
+<section>
+<h2>3. Systems &amp; Terminology</h2>
+<table>
+  <tr><th>System</th><th>Role</th></tr>
+  <tr><td>turing_service</td><td>Voice-calling micro-service; wraps Bolna; owns call datastore.</td></tr>
+  <tr><td>Kalaam backend</td><td>Caller; owns patients; stores lean outcomes; receives turing callbacks.</td></tr>
+  <tr><td>kalam_frontend</td><td>Operator UI; patient selection + campaign wizard.</td></tr>
+  <tr><td>Bolna</td><td>Voice-AI platform that places/records the calls.</td></tr>
+  <tr><td>demo_call_analyzer</td><td>Reusable transcript-analysis logic — future enrichment phase only.</td></tr>
+</table>
+<table class="kv">
+  <tr><td>Agent</td><td>A Bolna voice agent (prompt + voice + LLM config). Referenced by id.</td></tr>
+  <tr><td>Execution</td><td>One placed call (Bolna <code>execution_id</code>).</td></tr>
+  <tr><td>Batch</td><td>A set of calls created from a recipient list (Bolna <code>batch_id</code>).</td></tr>
+  <tr><td>Variable</td><td>A <code>{placeholder}</code> in the agent prompt filled per call.</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════ 4 ═══════════════════ -->
+<section>
+<h2>4. Design Decisions To Be Reviewed</h2>
+<table>
+  <tr><th>#</th><th>Decision</th><th>Rationale</th></tr>
+  <tr><td>D1</td><td><strong>Push model</strong> Kalaam sends the patient payload in to turing service. Kalaam builds the per-patient payload; turing never reads kalam_db.</td><td>Kalaam owns patient data + phone resolution; keeps turing generic and reusable.</td></tr>
+  <tr><td>D2</td><td><strong>Per-agent variable validation.</strong> turing validates each call against the selected agent’s required variables (422 if missing).</td><td>Prevents silent broken prompts; agents differ in variables.</td></tr>
+  <tr><td>D3</td><td><strong>Outcome flow:</strong> Bolna → turing <code>/webhooks/bolna</code> → turing persists → turing → Kalaam callback.</td><td>Event-driven; encapsulates Bolna specifics inside turing.</td></tr>
+  <tr><td>D4</td><td><strong>turing is stateful</strong> with a dedicated Postgres (own container). Raw + basic metrics now; LLM analytics later.</td><td>turing owns logs/transcripts/analytics as a shared service.</td></tr>
+  <tr><td>D5</td><td><strong>Kalaam new tables:</strong> lean per-patient outcome + turing reference id.</td><td>Avoids duplicating full transcripts; single source of truth in turing.</td></tr>
+  <tr><td>D6</td><td><strong>Auth:</strong> shared service API key (<code>X-API-Key</code>) on turing endpoints; HMAC-signed webhooks.</td><td>Simple service-to-service; secret internal URLs.</td></tr>
+  <tr><td>D7</td><td><strong>Retries:</strong> frontend exposes the full Bolna <code>retry_config</code>.</td><td>Operator control over retry behavior.</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════ 5 ═══════════════════ -->
+<section class="page-break">
+<h2>5. High-Level Architecture</h2>
+<pre>
+   ┌───────────────────┐        ┌────────────────────────┐        ┌───────────────────┐
+   │   kalam_frontend  │  HTTPS │     Kalaam backend     │ X-API- │   turing_service  │
+   │   (Next.js) │ ─────▶       │(FastAPI)      │  Key   │   (FastAPI) │
+   │  AI Voice Calling │  cookie│  /api/v1/voice-calls/* │ ─────▶ │  /calls /batches  │
+   └───────────────────┘  (JWT) │  turing_client         │        │  /agents          │
+                                │  voice_call_* tables   │ ◀───── │  webhook forwarder│
+                                │  /internal/turing/...  │  HMAC  │  ┌──────────────┐ │
+                                └────────────┬───────────┘        │  │ turing PG    │ │
+                                             │                    │  │              │ │
+                                    ┌────────▼─────────┐          │  └──────────────┘ │
+                                    │  kalam-postgres  │          └─────────┬─────────┘
+                                    │                  │              HTTPS │  Bearer
+                                    └──────────────────┘                    ▼
+                                                                   ┌───────────────────┐
+                                                                   │   Bolna (vendor)  │
+                                                                   │  api.bolna.ai     │
+                                                                   └───────────────────┘
+</pre>
+<p>The browser never contacts turing directly. Kalaam’s frontend proxies to the Kalaam
+backend (existing BFF pattern); only the Kalaam backend holds turing’s base URL and
+<code>X-API-Key</code>. turing is the sole component that talks to Bolna and the only
+holder of Bolna credentials.</p>
+</section>
+
+<!-- ═══════════════════ 6 ═══════════════════ -->
+<section>
+<h2>6. End-to-End Sequence</h2>
+<pre>
+Operator      kalam_frontend       Kalaam BE            turing              Bolna
+   │  select      │                   │                   │                   │
+   │─patients────▶│                   │                   │                   │
+   │  agent+vars  │  GET agents/vars  │  proxy            │                   │
+   │  retries     │──────────────────▶│──────────────────▶│  (agent contract) │
+   │   Send       │                   │                   │                   │
+   │─────────────▶│  POST voice-calls │                   │                   │
+   │              │──────────────────▶│  resolve phones   │                   │
+   │              │                   │  build payload    │                   │
+   │              │                   │  +patient_uhid    │                   │
+   │              │                   │  insert PENDING   │                   │
+   │              │                   │─POST /batches────▶│  validate vars     │
+   │              │                   │  (X-API-Key)      │  persist PENDING   │
+   │              │                   │                   │─create+schedule──▶│
+   │              │                   │◀──batch_id────────│◀──batch_id────────│
+   │              │◀──202 accepted────│                   │                   │
+   │              │                   │                   │   ...calls run... │
+   │              │                   │                   │◀─POST /webhooks───│  (per exec)
+   │              │                   │                   │  update row       │
+   │              │                   │◀─POST callback────│  (HMAC signed)    │
+   │              │                   │  upsert outcome   │                   │
+   │              │                   │  link patient     │                   │
+</pre>
+<p>A reconcile poll (turing → Bolna <code>GET /executions/{id}</code>; Kalaam → turing)
+covers missed webhooks and local-dev where turing is not publicly reachable.</p>
+</section>
+
+<!-- ═══════════════════ 7 ═══════════════════ -->
+<section>
+<h2>7. Standardized Ingestion Contract</h2>
+<p>Each recipient carries a standard set of fields. <code>contact_number</code> is the dialed
+number (→ Bolna <code>recipient_phone_number</code>); the rest are prompt variables. turing
+validates the subset the <em>selected agent</em> actually requires (D2).</p>
+<table>
+  <tr><th>Field</th><th>Type</th><th>Role</th></tr>
+  <tr><td>contact_number</td><td>E.164 string</td><td>Dialed number (not a prompt var)</td></tr>
+  <tr><td>patient_name</td><td>string</td><td>Prompt variable</td></tr>
+  <tr><td>doctors_name</td><td>string</td><td>Prompt variable</td></tr>
+  <tr><td>department</td><td>string</td><td>Prompt variable</td></tr>
+  <tr><td>personalized_symptoms</td><td>string</td><td>Prompt variable</td></tr>
+  <tr><td>red_flag_symptoms</td><td>string</td><td>Prompt variable</td></tr>
+  <tr><td>last_visit_date</td><td>date string</td><td>Prompt variable</td></tr>
+  <tr><td>follow_up_date</td><td>date string</td><td>Prompt variable</td></tr>
+  <tr><td>medicine_duration</td><td>string</td><td>Prompt variable</td></tr>
+  <tr><td>patient_uhid</td><td>string</td><td>Linkage ref; round-trips via Bolna <code>context_details.recipient_data</code></td></tr>
+</table>
+<div class="callout warn">
+  <strong>Review point:</strong> the agent prompts must reference these exact variable
+  names. Kalaam maps patient columns → these names in the wizard (defaults:
+  <code>phone→contact_number</code>, <code>name→patient_name</code>). Confirm naming with
+  the Bolna agent authors.
+</div>
+</section>
+
+<!-- ═══════════════════ 8 ═══════════════════ -->
+<section class="page-break">
+<h2>8. Component Design — turing_service</h2>
+<h3>8.1 Datastore</h3>
+<p>Add async SQLAlchemy + Alembic. A dedicated Postgres container (host port
+<strong>5433</strong>, avoiding kalam-postgres:5432 and docstribe-infra:5434). Tables:
+<code>batches</code>, <code>calls</code>, <code>request_logs</code> (see §11).</p>
+<h3>8.2 Authentication</h3>
+<p>An <code>X-API-Key</code> FastAPI dependency validates against
+<code>settings.turing_api_keys</code> (comma-separated). Applied to
+<code>/calls</code>, <code>/batches</code>, <code>/agents</code>,
+<code>/phone-numbers</code>. <code>/health</code> stays open;
+<code>/webhooks/bolna</code> is validated by source-IP allowlist
+(<code>13.203.39.153</code>) and/or a shared secret instead.</p>
+<h3>8.3 Persistence on create</h3>
+<p>Existing <code>calls</code>/<code>batches</code> routers write turing rows (status
+<code>pending</code>) around the Bolna call, recording the Bolna
+<code>batch_id</code>/<code>execution_id</code> and the per-recipient rows including
+<code>patient_ref</code>. The existing per-agent variable validation is retained.</p>
+<h3>8.4 Webhook receiver &amp; forwarder</h3>
+<p>New <code>app/routers/webhooks.py</code> → <code>POST /webhooks/bolna</code> updates the
+matching <code>calls</code> row (status, transcript, recording, extracted_data, cost) then
+<code>app/services/kalaam_notifier.py</code> POSTs a normalized <em>lean</em> outcome to
+<code>KALAAM_WEBHOOK_URL</code> with an <code>X-Webhook-Signature</code> (HMAC-SHA256). On
+create, turing sets Bolna <code>webhook_url = TURING_PUBLIC_URL + /webhooks/bolna</code>.</p>
+<h3>8.5 Read &amp; metrics endpoints</h3>
+<p><code>GET /batches/{id}</code>, <code>/batches/{id}/executions</code>,
+<code>/calls/{id}</code> served from turing’s DB; new
+<code>GET /batches/{id}/metrics</code> (counts, cost, success-rate) and transcript fetch.</p>
+<h3>8.6 New configuration</h3>
+<p><code>DATABASE_URL</code>, <code>TURING_API_KEYS</code>, <code>TURING_PUBLIC_URL</code>,
+<code>KALAAM_WEBHOOK_URL</code>, <code>KALAAM_WEBHOOK_SECRET</code>,
+<code>BOLNA_WEBHOOK_ALLOWED_IPS</code>.</p>
+</section>
+
+<!-- ═══════════════════ 9 ═══════════════════ -->
+<section>
+<h2>9. Component Design — Kalaam Backend</h2>
+<p>Mirror the existing <strong>Acefone</strong> telephony integration throughout.</p>
+<table>
+  <tr><th>New / changed</th><th>Purpose</th><th>Mirrors</th></tr>
+  <tr><td><code>app/services/turing_client.py</code></td><td>httpx client to turing (X-API-Key): create_single, create_batch, list_agents, get_agent_variables, get_status.</td><td><code>services/acefone_client.py</code></td></tr>
+  <tr><td><code>app/api/v1/endpoints/voice_calls.py</code></td><td>POST single, POST batch, GET agents, GET agents/{id}/variables. JWT (<code>get_current_user</code>). Resolve phone, build payload, insert pending rows.</td><td><code>endpoints/calls.py</code></td></tr>
+  <tr><td>2 models + Alembic migration</td><td><code>voice_call_batches</code>, <code>voice_call_records</code> (see §11).</td><td>—</td></tr>
+  <tr><td><code>app/api/internal/turing_webhook.py</code></td><td>POST <code>/internal/turing/call-completed</code>; verify HMAC; enqueue Celery; 200 fast.</td><td><code>internal/acefone_webhook.py</code> + <code>internal/whatsapp_webhook.py</code></td></tr>
+  <tr><td><code>app/workers/voice_call_tasks.py</code></td><td>Upsert <code>voice_call_records</code> by <code>turing_execution_id</code>; link patient by <code>patient_uhid</code> else phone; reconcile beat task.</td><td><code>workers/patient_call_record_tasks.py</code></td></tr>
+  <tr><td><code>app/core/config.py</code> + <code>.env*</code></td><td><code>TURING_BASE_URL</code>, <code>TURING_API_KEY</code>, <code>TURING_WEBHOOK_SECRET</code>.</td><td>Acefone config triplet</td></tr>
+</table>
+<p>Phone resolution reuses the existing order <code>phone → phone_captured →
+secondary_phone</code> and normalization helpers in
+<code>patient_call_record_service.py</code>.</p>
+</section>
+
+<!-- ═══════════════════ 10 ═══════════════════ -->
+<section>
+<h2>10. Component Design — kalam_frontend</h2>
+<p>Fill the existing (empty) <code>voice-calls</code> scaffold, cloning the WhatsApp Send /
+Campaign flow.</p>
+<ul>
+  <li><strong>Proxy:</strong> <code>app/api/voice-calls/[...path]/route.ts</code> (copy of the assignment proxy) → backend <code>/voice-calls/*</code>.</li>
+  <li><strong>Service:</strong> <code>lib/services/voice-calls.service.ts</code> — <code>listAgents</code>, <code>getAgentVariables</code>, <code>startSingle</code>, <code>startBatch</code>.</li>
+  <li><strong>Hook:</strong> <code>lib/hooks/useVoiceBatch.ts</code> (TanStack Query, copy of <code>useAssignment.ts</code>).</li>
+  <li><strong>UI:</strong> <code>app/(protected)/voice-calls/page.tsx</code> + <code>components/voice-calls/VoiceBatchWizard.tsx</code>, reusing <code>useAudienceSelection</code>, <code>PatientTable</code>, <code>SelectionPanel</code>.</li>
+</ul>
+<p><strong>Wizard steps:</strong> Audience (single | campaign via task-mgmt filters) → Agent +
+Variables (dynamic form from <code>GET /agents/{id}/variables</code>; map each required
+variable to a patient field or constant) → Retries (full <code>retry_config</code> form) →
+Review → Send.</p>
+</section>
+
+<!-- ═══════════════════ 11 ═══════════════════ -->
+<section class="page-break">
+<h2>11. Data Models</h2>
+<h3>11.1 turing Postgres (source of truth)</h3>
+<pre>
+batches           id (uuid pk) · client · agent_id · from_number · mode(single|batch)
+                  · retry_config(jsonb) · bolna_batch_id · status · total_count
+                  · valid_count · scheduled_at · created_at · updated_at
+
+calls             id (uuid pk) · batch_id(fk,null) · agent_id · contact_number
+                  · patient_ref · bolna_execution_id(unique) · status · transcript
+                  · recording_url · extracted_data(jsonb) · cost · duration
+                  · hangup_reason · retry_count · raw_payload(jsonb)
+                  · created_at · updated_at
+
+request_logs      id (uuid pk) · client · endpoint · method · status_code
+                  · latency_ms · created_at
+</pre>
+<h3>11.2 Kalaam new tables (lean outcome + reference)</h3>
+<pre>
+voice_call_batches   id (uuid pk) · created_by_id(fk users) · agent_id · mode
+                     · turing_batch_id · retry_config(jsonb) · audience(jsonb)
+                     · total_count · status · created_at · updated_at
+
+voice_call_records   id (uuid pk) · batch_id(fk voice_call_batches, null)
+                     · patient_id(fk patients, null, indexed) · contact_number
+                     · turing_execution_id(unique)  ← idempotent upsert key
+                     · status · disposition · recording_url · cost · duration
+                     · turing_ref · created_at · updated_at
+</pre>
+<div class="callout"><strong>Idempotency:</strong> both <code>calls.bolna_execution_id</code>
+and <code>voice_call_records.turing_execution_id</code> are unique; webhook handlers upsert
+on these keys so repeated deliveries are safe.</div>
+</section>
+
+<!-- ═══════════════════ 12 ═══════════════════ -->
+<section>
+<h2>12. API Contracts</h2>
+<h4>Kalaam → turing: create batch</h4>
+<pre>POST /batches            Headers: X-API-Key: &lt;secret&gt;
+{
+  "agent_id": "&lt;uuid&gt;",
+  "from_phone_number": "+9180...",
+  "retry_config": { "enabled": true, "max_retries": 2,
+                    "retry_on_statuses": ["no-answer","busy"],
+                    "retry_on_voicemail": false,
+                    "retry_intervals_minutes": [10, 30] },
+  "recipients": [
+    { "contact_number": "+9199...", "patient_uhid": "UH123",
+      "patient_name": "Asha", "doctors_name": "Dr. Rao",
+      "department": "Cardiology", "personalized_symptoms": "...",
+      "red_flag_symptoms": "...", "last_visit_date": "2026-06-20",
+      "follow_up_date": "2026-07-15", "medicine_duration": "30 days" }
+  ]
+}
+→ 201 { "batch_id": "...", "state": "created", "warnings": [] }
+→ 422 { "detail": { "error": "missing_required_variables",
+                    "missing": ["personalized_symptoms"], ... } }
+→ 401 (missing/invalid X-API-Key)</pre>
+<h4>turing → Kalaam: outcome callback (lean)</h4>
+<pre>POST /internal/turing/call-completed   Header: X-Webhook-Signature: sha256=&lt;hmac&gt;
+{
+  "turing_execution_id": "...", "turing_batch_id": "...",
+  "patient_uhid": "UH123", "contact_number": "+9199...",
+  "status": "completed", "disposition": null,
+  "recording_url": "https://...", "cost": 3.2, "duration": 42
+}
+→ 200 { "received": true }</pre>
+</section>
+
+<!-- ═══════════════════ 13 ═══════════════════ -->
+<section>
+<h2>13. Security &amp; Compliance</h2>
+<ul>
+  <li><strong>Service auth:</strong> <code>X-API-Key</code> on all turing business endpoints; key held only in Kalaam backend env, never in the browser.</li>
+  <li><strong>Webhook integrity:</strong> turing→Kalaam callbacks signed with HMAC-SHA256 over the raw body (mirror Kalaam’s WhatsApp webhook verify). Bolna→turing validated by source-IP allowlist.</li>
+  <li><strong>Secrets:</strong> Bolna API key isolated to turing; DB credentials, webhook secrets via env / secret manager. No secrets in the frontend bundle.</li>
+  <li><strong>PII/PHI:</strong> transcripts, recordings, and symptoms are sensitive. turing’s DB and Kalaam tables must inherit the same data-handling controls (encryption at rest, access control, retention). Recording URLs are provider-signed; consider expiry.</li>
+  <li><strong>Transport:</strong> TLS between all hops in non-local environments.</li>
+</ul>
+</section>
+
+<!-- ═══════════════════ 14 ═══════════════════ -->
+<section>
+<h2>14. Reliability, Idempotency &amp; Error Handling</h2>
+<ul>
+  <li><strong>Idempotent upserts</strong> on unique execution ids (both sides) — safe webhook retries.</li>
+  <li><strong>Reconcile poll</strong> (Celery beat on Kalaam; turing→Bolna) catches missed webhooks / local-dev where turing is not publicly reachable.</li>
+  <li><strong>Fast-ack webhooks:</strong> receivers return 200 immediately and process asynchronously via Celery.</li>
+  <li><strong>Upstream failures:</strong> turing surfaces Bolna’s status code; transport failures → 502. Kalaam persists <code>pending</code> before calling turing, so a failed submit is visible and retryable.</li>
+  <li><strong>Partial batch failures:</strong> recorded per-call; batch status derived from execution states.</li>
+</ul>
+</section>
+
+<!-- ═══════════════════ 15 ═══════════════════ -->
+<section class="page-break">
+<h2>15. Deployment &amp; Infrastructure</h2>
+<table>
+  <tr><th>Component</th><th>Host port</th><th>Notes</th></tr>
+  <tr><td>turing app</td><td>8005</td><td>FastAPI/uvicorn.</td></tr>
+  <tr><td>turing Postgres</td><td>5433</td><td>New dedicated container (this work).</td></tr>
+  <tr><td>kalam-postgres</td><td>5432</td><td>Existing (Kalaam DB, dump loaded).</td></tr>
+  <tr><td>docstribe-infra Postgres</td><td>5434</td><td>Untouched.</td></tr>
+  <tr><td>Kalaam api</td><td>8000</td><td>Existing.</td></tr>
+  <tr><td>kalam_frontend</td><td>3000</td><td>Existing.</td></tr>
+</table>
+<div class="callout warn"><strong>Webhook reachability:</strong> Bolna cannot reach
+<code>localhost</code>. Live webhooks require turing to be publicly reachable (tunnel/deploy).
+For local dev, the reconcile poll and a manual “simulate webhook” POST cover the outcome path.</div>
+</section>
+
+<!-- ═══════════════════ 16 ═══════════════════ -->
+<section>
+<h2>16. Testing &amp; Verification</h2>
+<ul>
+  <li><strong>turing (offline, fake Bolna):</strong> Alembic migrations apply to turing PG; create-call/batch writes rows; <code>X-API-Key</code> enforced (401 without); missing agent variables → 422.</li>
+  <li><strong>turing webhook:</strong> POST a sample Bolna execution payload to <code>/webhooks/bolna</code>; assert row update + signed forward (verify HMAC + lean body).</li>
+  <li><strong>Kalaam BE (live kalam-postgres):</strong> signed sample outcome → <code>/internal/turing/call-completed</code>; assert idempotent upsert + patient link by <code>patient_uhid</code>. Trigger endpoint with stubbed turing_client → payload build + pending rows; no Bolna call.</li>
+  <li><strong>Frontend:</strong> <code>tsc --noEmit</code>; wizard click-through against mocked backend (agent list, variable form, retries, single/campaign payload shapes).</li>
+  <li><strong>End-to-end (gated):</strong> only with explicit approval + 1–2 test numbers; otherwise simulate via the webhook POST.</li>
+</ul>
+</section>
+
+<!-- ═══════════════════ 17 ═══════════════════ -->
+<section>
+<h2>17. Rollout Plan &amp; Milestones</h2>
+<table>
+  <tr><th>#</th><th>Milestone</th><th>Deliverable</th></tr>
+  <tr><td>M1</td><td>turing datastore + auth</td><td>PG container, models, Alembic, persist-on-create, <code>X-API-Key</code>.</td></tr>
+  <tr><td>M2</td><td>turing outcome pipeline</td><td><code>/webhooks/bolna</code>, Kalaam forwarder, read/metrics endpoints.</td></tr>
+  <tr><td>M3</td><td>Kalaam trigger side</td><td>New tables, <code>turing_client</code>, trigger endpoints, pending rows.</td></tr>
+  <tr><td>M4</td><td>Kalaam callback side</td><td>Callback webhook, Celery upsert, reconcile.</td></tr>
+  <tr><td>M5</td><td>Frontend</td><td>Proxy, service, hook, voice-calls wizard.</td></tr>
+  <tr><td>M6</td><td>E2E hardening</td><td>Gated live test, metrics, docs.</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════ 18 ═══════════════════ -->
+<section>
+<h2>18. Risks &amp; Mitigations</h2>
+<table>
+  <tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr>
+  <tr><td>Webhook not reachable (NAT/local)</td><td>Outcomes never arrive</td><td>Reconcile poll fallback; deploy turing publicly for prod.</td></tr>
+  <tr><td>Agent prompt variable names drift</td><td>422s / wrong data</td><td>Per-agent validation surfaces mismatches early; wizard mapping step.</td></tr>
+  <tr><td>PII/PHI in transcripts</td><td>Compliance exposure</td><td>Encryption, access control, retention; recording URL expiry.</td></tr>
+  <tr><td>Duplicate webhook deliveries</td><td>Double-counting</td><td>Idempotent upsert on unique execution ids.</td></tr>
+  <tr><td>Bolna rate limits / cost overruns</td><td>Failed/expensive batches</td><td>Respect Bolna concurrency (25); batch guardrails; basic cost metrics.</td></tr>
+  <tr><td>Two Postgres instances confusion</td><td>Ops errors</td><td>Distinct ports (5432/5433/5434) documented; named volumes.</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════ 19 ═══════════════════ -->
+<section>
+<h2>19. Open Questions for Reviewers</h2>
+<ol>
+  <li>Confirm the Bolna agent prompts use the exact standard variable names in §7.</li>
+  <li>Is <code>patient_uhid</code> the right stable linkage key, or should we use Kalaam’s internal <code>patient_id</code>?</li>
+  <li>Retention policy for transcripts/recordings in turing (PHI) — how long, and who can read?</li>
+  <li>Deployment target + public URL for turing (webhook ingress) and TLS termination.</li>
+  <li>Single shared <code>X-API-Key</code> now vs. per-client keys — acceptable for first release?</li>
+  <li>Should campaign scheduling (future-dated batches) be in scope for the first release?</li>
+</ol>
+</section>
+
+<!-- ═══════════════════ 20 ═══════════════════ -->
+<section>
+<h2>20. Out of Scope / Future Phases</h2>
+<ul>
+  <li>LLM transcript analytics &amp; disposition inference in turing (reuse <code>demo_call_analyzer.analyze_transcript</code>).</li>
+  <li>Multi-tenant per-client webhook routing.</li>
+  <li>Per-client API keys, quotas, and usage billing.</li>
+  <li>Campaign history dashboards &amp; richer analytics.</li>
+  <li>Inbound call handling.</li>
+</ul>
+<p class="muted" style="margin-top:24px; border-top:1px solid var(--line); padding-top:10px;">
+End of document — turing × Kalaam Voice Calling Integration Design v0.1 (Draft for review).</p>
+</section>
+
+</body>
+</html>

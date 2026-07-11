@@ -1,0 +1,29 @@
+# turing_service infrastructure — dedicated Postgres for turing's own records
+# (batches, calls, transcripts, request logs).
+#
+# Host port 5433 (kalam-postgres uses 5432; docstribe-infra uses 5434).
+#
+#   docker compose up -d postgres
+#   alembic upgrade head        # apply turing's schema
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: turing-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${TURING_PG_USER:-turing}
+      POSTGRES_PASSWORD: ${TURING_PG_PASSWORD:-turing}
+      POSTGRES_DB: ${TURING_PG_DB:-turing_db}
+    ports:
+      - "${TURING_PG_PORT:-5433}:5432"
+    volumes:
+      - turing-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TURING_PG_USER:-turing} -d ${TURING_PG_DB:-turing_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  turing-postgres-data:
