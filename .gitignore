@@ -27,5 +27,4 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
-frontend/
 commands.txt

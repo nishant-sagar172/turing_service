@@ -12,6 +12,13 @@ webhook.
 - **Auth:** shared `X-API-Key` header on all business endpoints
 - **API version prefix:** `/v1`
 
+Also hosted in this repo (operationally independent of the voice service):
+**SQL Builder Agent** (`app/sql_agent/`, in development) — a natural-language-to-SQL
+agent targeting Kalaam's Postgres. See
+[docs/SQL Builder Agent - Implementation.md](docs/SQL%20Builder%20Agent%20-%20Implementation.md)
+for the plan and [docs/kalaam-db-schema.md](docs/kalaam-db-schema.md) for the full
+introspected schema of the target DB (exactly what gets fed to its metadata/embeddings).
+
 ---
 
 ## 1. What it does
@@ -318,14 +325,90 @@ curl -X POST http://localhost:8005/webhooks/bolna -H "Content-Type: application/
 
 ## 11. Data model (turing's Postgres)
 
-| Table | Holds |
-|---|---|
-| `batches` | id, client, agent_id, from_number, mode, retry_config (jsonb), `bolna_batch_id` (unique), status, counts, scheduled_at, timestamps |
-| `calls` | id, batch_id (fk), agent_id, contact_number, patient_ref, `bolna_execution_id` (unique — idempotency key), status, transcript, recording_url, extracted_data (jsonb), cost, duration, hangup_reason, retry_count, raw_payload (jsonb), timestamps |
-| `request_logs` | request_id, client, method, endpoint, status_code, latency_ms, timestamps |
+Three tables, all UUID primary keys, all carrying `created_at` / `updated_at`
+(timezone-aware, auto-managed). `batches` and `calls` form the campaign→call
+hierarchy; `request_logs` stands alone as an audit trail.
 
-Idempotency: outcome upserts key on `bolna_execution_id`, so repeated webhook
-deliveries are safe.
+```
+ ┌──────────────────────────────────────────────┐
+ │ batches                    (one per campaign) │
+ ├──────────────────────────────────────────────┤
+ │ PK  id                 uuid                    │
+ │     client             varchar(64)   caller    │
+ │     agent_id           varchar(64)   NN        │
+ │     from_number        varchar(32)   caller-ID │
+ │     mode               varchar(16)   NN 'batch'│
+ │     retry_config       jsonb                   │
+ │ U,IX bolna_batch_id    varchar(64)  ← Bolna id │
+ │     status             varchar(32)   NN        │
+ │     total_count        integer       NN        │
+ │     valid_count        integer                 │
+ │     scheduled_at       varchar(64)             │
+ │     recipients_snapshot jsonb                  │
+ │     created_at / updated_at  timestamptz  NN   │
+ └───────────────┬──────────────────────────────┘
+                 │ 1
+                 │            batches.id  =  calls.batch_id
+                 │ N          (ON DELETE: none — calls keep the fk)
+ ┌───────────────┴──────────────────────────────┐
+ │ calls              (one per Bolna execution:  │
+ │                     single sends AND members) │
+ ├──────────────────────────────────────────────┤
+ │ PK   id                uuid                    │
+ │ FK,IX batch_id         uuid  → batches.id  (nullable: single sends have none) │
+ │      client            varchar(64)             │
+ │      agent_id          varchar(64)   NN        │
+ │ IX   contact_number    varchar(32)             │
+ │ IX   patient_ref       varchar(128)  consumer's patient key (e.g. uhid) │
+ │ U,IX bolna_execution_id varchar(64)  ← idempotency key │
+ │      status            varchar(32)   NN        │
+ │      transcript        text                    │
+ │      recording_url     text                    │
+ │      extracted_data    jsonb                   │
+ │      cost              double precision         │
+ │      duration          double precision         │
+ │      hangup_reason     varchar(128)            │
+ │      retry_count       integer                 │
+ │      raw_payload       jsonb   full Bolna push │
+ │      created_at / updated_at  timestamptz  NN  │
+ └──────────────────────────────────────────────┘
+
+ ┌──────────────────────────────────────────────┐
+ │ request_logs        (audit — no relationships)│
+ ├──────────────────────────────────────────────┤
+ │ PK   id             uuid                       │
+ │ IX   request_id     varchar(36)   NN  X-Request-ID │
+ │      client         varchar(64)       key-XXXXXX   │
+ │      method         varchar(8)    NN               │
+ │      endpoint       varchar(256)  NN               │
+ │      status_code    integer       NN               │
+ │      latency_ms     double precision NN            │
+ │      created_at / updated_at  timestamptz  NN      │
+ └──────────────────────────────────────────────┘
+
+ Legend:  PK = primary key   FK = foreign key   U = unique
+          IX = indexed       NN = NOT NULL
+```
+
+**How the tables are used**
+
+- **`batches`** — one row per campaign, created 1:1 with a Bolna batch. `bolna_batch_id`
+  is the unique handle turing looks a batch up by; `status` tracks the lifecycle
+  (`created → scheduled → running → completed / stopped / failed / deleted`);
+  `recipients_snapshot` keeps the exact JSON that was submitted.
+- **`calls`** — one row per outbound call. A **single send** has `batch_id = NULL`;
+  a **campaign member** points back to its `batches.id`. `bolna_execution_id` is the
+  **idempotency key**: outcome upserts (webhook *and* reconcile poll) key on it, so
+  repeated deliveries for the same execution re-write the same row rather than
+  duplicating. `raw_payload` stores the full Bolna push; `transcript` / `recording_url`
+  / `cost` / `duration` are the extracted outcome fields.
+- **`request_logs`** — written by the request middleware for every business call:
+  the `X-Request-ID`, the non-secret caller label (`client` = `key-XXXXXX`), method,
+  endpoint, resulting status, and latency. No FK to the other tables — pure audit.
+
+**Consumer split:** turing is the source of truth for the *full* record (transcript,
+raw payload, cost). A consumer like Kalaam stores only a **lean outcome** keyed by
+`bolna_execution_id` + `patient_ref`, and calls back into turing for detail.
 
 ---
 

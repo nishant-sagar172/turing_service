@@ -8,7 +8,9 @@
 
 services:
   postgres:
-    image: postgres:17-alpine
+    # pgvector build of Postgres 17 — the sql_agent control plane (sql_agent_db,
+    # a sibling database on this server) needs CREATE EXTENSION vector.
+    image: pgvector/pgvector:pg17
     container_name: turing-postgres
     restart: unless-stopped
     environment:
@@ -24,6 +26,26 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+  redis:
+    image: redis:7-alpine
+    container_name: turing-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --requirepass
+      - "${TURING_REDIS_PASSWORD:-turing}"
+    ports:
+      - "${TURING_REDIS_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${TURING_REDIS_PASSWORD:-turing}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   turing-postgres-data:

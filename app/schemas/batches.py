@@ -65,7 +65,7 @@ class ScheduleBatchRequest(BaseModel):
     def _normalize_scheduled_at(cls, value: str) -> str:
         return normalize_scheduled_at(value)
 
-    def to_bolna_payload(self) -> dict[str, Any]:
+    def to_voice_engine_payload(self) -> dict[str, Any]:
         return self.model_dump(exclude_none=True)
 
 
@@ -87,6 +87,7 @@ class BatchSummary(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     batch_id: str | None = None
+    internal_id: str | None = None  # turing's internal UUID; used by frontend to filter calls/analytics
     status: str | None = None
     scheduled_at: str | None = None
     file_name: str | None = None

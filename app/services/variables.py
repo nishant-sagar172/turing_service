@@ -1,31 +1,37 @@
-"""Service layer for agent-variable resolution and validation.
-
-Fetches an agent's config (read-only) and turns it into a required/optional
-variable contract, then validates caller-supplied data against it.
-"""
-
 from __future__ import annotations
 
+import uuid
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import Settings
-from app.core.bolna_client import BolnaClient
 from app.core.variables import (
     load_variable_overrides,
     resolve_agent_variables,
     validate_variables,
 )
+from app.core.voice_engine import VoiceEngineClient
+from app.services.agent_sync import get_variable_overrides
 
 
 async def resolve_variables(
-    client: BolnaClient, agent_id: str, settings: Settings
+    client: VoiceEngineClient,
+    agent_id: str,
+    settings: Settings,
+    *,
+    session: AsyncSession | None = None,
+    client_id: uuid.UUID | None = None,
 ) -> dict[str, list[str]]:
-    """Fetch the agent and return its required/optional variable contract."""
     agent = await client.get_agent(agent_id)
-    overrides = load_variable_overrides(settings.agent_variables_file).get(
-        agent_id, {}
-    )
+    overrides = load_variable_overrides(settings.agent_variables_file).get(agent_id, {})
+    if session is not None and client_id is not None:
+        per_client = await get_variable_overrides(session, client_id, agent_id)
+        if per_client:
+            overrides = per_client
     return resolve_agent_variables(agent, overrides)
 
 
-def check(provided: set[str], contract: dict[str, list[str]]) -> tuple[list[str], list[str]]:
-    """Return (missing_required, unrecognized_extra) for provided keys."""
+def check(
+    provided: set[str], contract: dict[str, list[str]]
+) -> tuple[list[str], list[str]]:
     return validate_variables(provided, contract["required"], contract["optional"])
