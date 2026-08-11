@@ -1,12 +1,12 @@
 """Read-only introspection of an agent's variables.
 
-We NEVER modify an agent. We only read its existing Bolna config to discover
-which ``{placeholder}`` variables its prompt already references, so turing can
-validate that a caller supplied them before placing a call.
+We NEVER modify an agent. We only read its existing voice-engine config to
+discover which ``{placeholder}`` variables its prompt already references, so
+turing can validate that a caller supplied them before placing a call.
 
-Bolna variable rules (from the docs):
+Voice-engine variable rules (from the Bolna docs):
 - User variables use ``{variable_name}`` syntax inside the prompt.
-- System variables are auto-injected by Bolna and must NOT be treated as
+- System variables are auto-injected by the engine and must NOT be treated as
   caller-supplied.
 """
 
@@ -17,7 +17,7 @@ import re
 from functools import lru_cache
 from typing import Any
 
-# Auto-injected by Bolna; callers never provide these.
+# Auto-injected by the voice engine; callers never provide these.
 SYSTEM_VARIABLES: frozenset[str] = frozenset(
     {
         "agent_id",

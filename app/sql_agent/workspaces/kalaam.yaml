@@ -1,0 +1,2506 @@
+# Kalaam workspace enrichment — hand-authored/agent-drafted metadata layer.
+# Merged with auto-introspection by the ingestion pipeline (§3 of the implementation plan).
+# Provenance: drafted by domain-grouped agents from docs/kalaam-db-schema.md + read-only
+# DISTINCT sampling of categorical columns; every group adversarially reviewed; enum values
+# re-verified against the live DB. NO connection strings or credentials belong in this file.
+# Human edits welcome — this file is the source of truth; re-run ingestion after editing.
+
+workspace: kalaam
+version: 1
+datasource:
+  dialect: postgresql
+  default_schema: public
+  connection_env_var: KALAAM_READONLY_DATABASE_URL
+
+instructions: |
+  Cross-cutting quirks of this database:
+  - patients.age is varchar, not integer — cast before numeric comparisons.
+  - patient_visits.department is free-form with inconsistent casing and typos
+    (e.g. CARDIOLOGY vs Cardiology, ORHTOPAEDICS) — normalize with upper()/ilike when grouping.
+  - The doctors table is empty; use the denormalized patient_visits.doctor_name text instead.
+  - audit_logs, analytics_events, analytics_daily_summary and scheduler_logs are empty in
+    this environment — do not expect answers from them.
+  - Several references are by-value without FK constraints (see per-table join_hints),
+    including polymorphic entity_type/entity_id pairs.
+  - For pregnant patients, look for only obstetrics type in patients.workflow_type or prescriptions.form_data.program_type, nothing else.
+
+
+tables:
+
+  # ── patients-visits (9 tables) — repaired ─────────────────────────
+  patients:
+    description: >
+      Master registry of patients known to the hospital outreach/workflow system (~28,000+ rows).
+      One row per patient, identified by hospital UHID, carrying demographics, contact numbers,
+      the assigned calling agent, and the patient's current position in the follow-up workflow
+      (workflow_status / sub_status plus IPD-vs-OPD workflow type). Also stores AI-derived
+      clinical rollups (clinical_summary, clinical_timeline, IP admission/conversion metrics) used
+      to prioritize which patients agents should work. Nearly every operational table (visits,
+      prescriptions, calls, schedules, escalations, reminders, WhatsApp) hangs off patients.id.
+    columns:
+      uhid:
+        description: Hospital-issued Unique Health ID; the business key patients are looked up by across systems.
+        sensitive: true
+      client_uhid:
+        description: UHID as supplied by the client/hospital source system (may differ in format from uhid).
+        sensitive: true
+      name:
+        sensitive: true
+      phone:
+        sensitive: true
+      phone_captured:
+        description: Phone number captured during calling (may differ from the registered phone).
+        sensitive: true
+      secondary_phone:
+        sensitive: true
+      email:
+        sensitive: true
+      age:
+        description: Stored as a varchar, not an integer — cast before numeric comparisons.
+        sensitive: true
+      gender:
+        values: [MALE, FEMALE]
+      agent_id:
+        description: Calling/ops agent (users.id) currently assigned to work this patient.
+      agent_worked_status:
+        description: Whether the assigned agent has actioned this patient yet.
+        values: [worked]
+      workflow_type:
+        description: Which care/revenue workflow the patient is in — inpatient conversion, outpatient, or gynaecology program.
+        values: [gynae_workflow, ipd, opd]
+      workflow_status:
+        description: Primary funnel status of the patient in the follow-up workflow (agent disposition after outreach).
+        values: [booking, close_enquiry, cost_help, follow_up, insurance_loan_pending, medical_clearance_pending, new, not_advised, not_interested, on_medications, second_opinion, visited, waiting_for_doctor_reports]
+      workflow_sub_status:
+        description: Finer-grained reason under workflow_status.
+        values: [booking, close_enquiry, discount_asked, doctor_ok_pending, follow_up, insurance_approval_pending, loan_approval_pending, medical_clearance_pending, negative_feedback, new, not_advised, on_medications, other, report_pending, second_opinion, visited, waiting_estimate]
+      workflow_secondary_status:
+        description: Parallel/secondary funnel status (same vocabulary as workflow_status, plus couldnt_reach).
+        values: [booking, close_enquiry, cost_help, couldnt_reach, follow_up, insurance_loan_pending, medical_clearance_pending, new, not_advised, not_interested, on_medications, second_opinion, visited, waiting_for_doctor_reports]
+      workflow_secondary_sub_status:
+        description: Sub-status companion to workflow_secondary_status.
+      stage:
+        description: Currently unpopulated (only blank values observed); purpose unclear.
+      risk_category:
+        description: Clinical/commercial risk bucket; only 'high' observed so far (mostly null).
+        values: [high]
+      payor_type:
+        description: How the patient pays — government schemes (CGHS/ECHS/ESI), private insurance, or other/self.
+        values: [CGHS, ECHS, ESI, INSURANCE, OTHERS]
+      payor_name:
+        description: Name of the insurer/scheme (organization name, not a person).
+      ip_conversion_probability:
+        description: Model-estimated likelihood the patient converts to an inpatient (IP) admission.
+        values: [high, low, medium]
+      clinical_summary:
+        description: JSONB AI-generated clinical summary of the patient; free-text medical content.
+        sensitive: true
+      clinical_timeline:
+        description: JSONB chronological clinical events for the patient.
+        sensitive: true
+      clinical_timeline_by_visits:
+        description: JSONB clinical timeline grouped per visit.
+        sensitive: true
+      ip_progression_summary:
+        description: JSONB summary of the patient's progression toward inpatient admission.
+        sensitive: true
+      ip_admission_metrics:
+        description: JSONB metrics around inpatient admission potential; expected scores/counters rather than narrative PII, so left unflagged.
+      ip_potential_metrics:
+        description: JSONB model metrics on IP conversion potential; expected scores/counters rather than narrative PII, so left unflagged.
+      radiology_metrics:
+        description: JSONB radiology-related metrics; expected scores/counters rather than narrative PII, so left unflagged.
+      care_plan_filters:
+        description: JSONB filter tags used by the care-plan UI.
+      last_visit:
+        description: JSONB snapshot of the patient's most recent visit (denormalized convenience copy).
+        sensitive: true
+      last_visit_date:
+        description: Date of most recent visit (denormalized from patient_visits).
+      previously_not_interested:
+        description: Flag that the patient was marked not_interested in an earlier cycle — used to deprioritize re-outreach.
+      counselling_done:
+        description: Whether counselling was completed for this patient (procedure-conversion workflow).
+      package_taken:
+        description: Whether the patient purchased a treatment package.
+      verified_by:
+        description: Free-text name of the person who verified the patient record (not a user id).
+        sensitive: true
+      search_vector:
+        description: Postgres tsvector for full-text patient search (built over identifying fields, so PII lexemes are reconstructible); not for analytics.
+        sensitive: true
+
+  patient_visits:
+    description: >
+      One row per hospital visit/encounter of a patient (~52,800+ rows, visits from Mar 2025 onward).
+      Links the patient to the doctor seen, the department, the visit date, and the prescription
+      generated in that visit. Carries AI-derived per-visit clinical rollups (clinical_summary,
+      clinical_timeline, IP progression/potential metrics) that drive the follow-up task engine —
+      follow-up tasks in visits_actions are created against these visits. Effectively the
+      "encounter" table of the system.
+    columns:
+      status:
+        description: Visit processing status; only 'completed' observed.
+        values: [completed]
+      doctor_name:
+        description: Denormalized doctor name as text; doctor_id is the FK to doctors but doctors table is currently empty, so this text field is the practical doctor attribute.
+        sensitive: true
+      department:
+        description: Hospital department of the visit. Free-form and inconsistent in casing/spelling ('CARDIOLOGY' vs 'Cardiology', 'ORHTOPAEDICS' typo variants exist) — normalize with upper()/ilike when grouping.
+        values: [CARDIOLOGY, UROLOGY, ENT, DENTAL, RADIOLOGY, RHEUMATOLOGY, "OBSTETRICS & GYNAECOLOGY", "SURGICAL GASTROENTEROLOGY", "MEDICAL GASTROENTEROLOGY", "MEDICAL GASTROENTEROLOGY & HEPATOLOGY", "MEDICAL ONCOLOGY & HEMATOLOGY", "RADIATION ONCOLOGY", "PLASTIC SURGERY", "ACCIDENT & EMERGENCY", "INFECTIOUS DISEASES", "ENDOCRINOLOGY & METABOLIC DISORDERS", "ORTHOPAEDICS, JOINT CENTRE & SPORTS CLINIC", "CONTINENTAL FERTILITY CENTRE", "OP-General"]
+      is_escalated:
+        description: Whether this visit was escalated; only false observed so far.
+      escalation_level:
+        description: Currently unpopulated.
+      visit_date:
+        description: Timestamp of the encounter; observed range 2025-03-08 to present.
+      prescription_id:
+        description: The prescription captured during this visit (prescriptions.id).
+      clinical_summary:
+        description: JSONB AI summary of this visit's clinical content.
+        sensitive: true
+      clinical_timeline:
+        description: JSONB clinical event timeline for this visit.
+        sensitive: true
+      ip_progression_summary:
+        description: JSONB summary of inpatient-conversion progression signals from this visit.
+        sensitive: true
+      ip_potential_metrics:
+        description: JSONB model metrics on IP admission potential from this visit; expected scores/counters rather than narrative PII, so left unflagged.
+      ip_conversion_probability:
+        description: Per-visit model estimate of inpatient conversion likelihood.
+        values: [high, low, medium]
+      radiology_tags:
+        description: JSONB array of radiology-related tags extracted for the visit; clinical content.
+        sensitive: true
+
+  visits_actions:
+    description: >
+      The follow-up task queue — the largest operational table (~198,700 rows). One row is a single
+      actionable task derived from a patient visit (mostly AI-extracted from prescriptions):
+      e.g. a follow-up consult, lab test, radiology test, procedure, or IP admission opportunity.
+      Tasks carry urgency, revenue potential, due date, lifecycle status, the agent assigned, and a
+      snapshot of the patient's workflow status at action time. This is the table to query for
+      "pending tasks", "completed follow-ups", "revenue opportunities by type", agent productivity.
+    columns:
+      action_type:
+        description: The kind of follow-up task recommended.
+        values: [follow_up, ip_admission, lab_test, medication, obstetrics, physiotherapy, procedure, radiology_test, referral, vaccination]
+      status:
+        description: Task lifecycle state.
+        values: [cancelled, completed, pending, scheduled]
+      urgency:
+        description: Clinical urgency of the task.
+        values: [critical, high, medium]
+      title:
+        description: Short human-readable task title (may contain clinical content).
+        sensitive: true
+      description:
+        description: Free-text task detail; clinical content.
+        sensitive: true
+      evidence:
+        description: Free-text supporting evidence extracted from the prescription for why the task exists.
+        sensitive: true
+      revenue_potential:
+        description: Estimated revenue (integer, currency units) if the task converts — used to rank opportunities.
+      source:
+        description: Provenance of the task; observed format 'prescription_ai:<uuid>' where the uuid points at the source prescription record — tasks are AI-generated from prescriptions.
+      due_date:
+        description: When the task should be completed by.
+      task_type_id:
+        description: FK to task_types, the configured task taxonomy.
+      agent_id:
+        description: Agent (users.id) assigned to work this task — stored as varchar without an FK constraint.
+      agent_worked_status:
+        description: Whether the assigned agent has actioned the task.
+        values: [assigned, worked]
+      workflow_type:
+        values: [gynae_workflow, ipd, opd]
+      workflow_status:
+        description: Patient workflow status stamped on the task (same vocabulary as patients.workflow_status).
+        values: [booking, close_enquiry, cost_help, follow_up, insurance_loan_pending, medical_clearance_pending, new, not_advised, not_interested, on_medications, second_opinion, visited, waiting_for_doctor_reports]
+      workflow_sub_status:
+        values: [booking, close_enquiry, discount_asked, doctor_ok_pending, follow_up, insurance_approval_pending, loan_approval_pending, medical_clearance_pending, negative_feedback, new, not_advised, on_medications, other, report_pending, second_opinion, visited, waiting_estimate]
+      workflow_secondary_status:
+        values: [booking, cost_help, couldnt_reach, follow_up, insurance_loan_pending, medical_clearance_pending, new, not_advised, not_interested, on_medications, second_opinion, visited, waiting_for_doctor_reports]
+      is_fitness_case:
+        description: Flags fitness-for-surgery clearance cases.
+      transfer_doctor_name:
+        description: Doctor name the task/patient was transferred to (free text).
+        sensitive: true
+      associated_appointment_id:
+        description: uuid of a related appointment; no FK constraint declared.
+      first_level_assigned_at:
+        description: When the task was first assigned to a level-1 agent (timestamp without tz, unlike siblings).
+    join_hints:
+      - agent_id holds users.id as varchar (no FK constraint)
+      - associated_appointment_id holds appointments.id (no FK constraint)
+      - source encodes the source prescription id as 'prescription_ai:<uuid>' — extract with split_part(source, ':', 2)
+
+  patient_schedules:
+    description: >
+      Header record for a recurring care-plan schedule for one patient (e.g. a physiotherapy or
+      injection course): defines the task type, start date/time, recurrence (scheduling_type,
+      gap_days, weekly_pattern, skip_days), total sessions, and running counters of
+      completed/cancelled/skipped sessions. Individual dated sessions live in schedule_occurrences;
+      manual date changes are logged in schedule_adjustments. Can originate from a visits_actions
+      task (visit_action_id). Table is currently EMPTY (0 rows) — feature built but not yet used
+      in this pilot.
+    columns:
+      schedule_code:
+        description: Short human-facing code for the schedule.
+      status:
+        description: Schedule lifecycle status (varchar(9); no rows yet to sample — likely values like active/completed/cancelled, unverified).
+      scheduling_type:
+        description: Recurrence mode (varchar(14); empty table, values unverified).
+      total_sessions:
+        description: Planned number of sessions in the course.
+      completed_sessions:
+        description: Counter of sessions done (denormalized from occurrences).
+      gap_days:
+        description: Days between consecutive sessions for gap-based recurrence.
+      weekly_pattern:
+        description: Array of weekdays for weekly recurrence.
+      skip_days:
+        description: Array of days/dates to skip when generating occurrences.
+      visit_action_id:
+        description: The visits_actions task this schedule was created to fulfil.
+      notes:
+        sensitive: true
+      location:
+        description: Where sessions take place.
+
+  schedule_occurrences:
+    description: >
+      One row per individual dated session generated from a patient_schedules plan — session number,
+      scheduled date/time, the original date/time before any reschedule, completion status and who
+      completed it, and an optional link to a booked appointment. Currently EMPTY (0 rows); schema
+      ready but unused in this pilot.
+    columns:
+      status:
+        description: Session status (varchar(9); no data to sample — likely pending/completed/skipped-style values, unverified).
+      original_date:
+        description: Date the session was first planned for; differs from scheduled_date after a reschedule.
+      original_time:
+        description: Original planned time before any adjustment.
+      session_number:
+        description: 1-based index of this session within the schedule's course.
+      notes:
+        sensitive: true
+
+  schedule_adjustments:
+    description: >
+      Audit log of manual changes to a care-plan schedule or one of its sessions: who adjusted,
+      when, the adjustment type, and old vs new date/time. Joins to patient_schedules (whole-plan
+      changes) and optionally schedule_occurrences (single-session changes). Currently EMPTY
+      (0 rows).
+    columns:
+      adjustment_type:
+        description: Kind of change made (empty table, values unverified — e.g. reschedule/cancel style).
+      reason:
+        description: Free-text justification for the change.
+        sensitive: true
+      old_date:
+        description: Date before the adjustment (paired with new_date).
+      adjusted_at:
+        description: When the adjustment took effect (distinct from created_at).
+
+  patient_suppression_list:
+    description: >
+      Do-not-contact list (~5,900 rows): patients, keyed by UHID, who must be excluded from outbound
+      calling/messaging campaigns — e.g. already converted or lost leads uploaded from spreadsheets
+      (observed source_file 'converted_or_lost (1).xlsx'). Check is_active here before including a
+      patient in any outreach. No FK to patients; match on uhid (or phone).
+    columns:
+      uhid:
+        description: Hospital UHID of the suppressed patient; join key to patients.uhid (no FK constraint).
+        sensitive: true
+      patient_name:
+        sensitive: true
+      phone:
+        sensitive: true
+      source_file:
+        description: Name of the uploaded file this suppression entry came from.
+        values: ["converted_or_lost (1).xlsx"]
+      remarks:
+        description: Free-text reason/notes for suppression.
+        sensitive: true
+      is_active:
+        description: Whether the suppression is currently in force; only true observed.
+        values: [true]
+    join_hints:
+      - uhid matches patients.uhid by value (no FK constraint)
+
+  nursing_visit_log:
+    description: >
+      Antenatal-care (ANC) nursing visit register: one row per pregnancy case logged by nursing
+      staff, with an auto-incrementing ANC number as primary key, patient demographics, guardian,
+      LMP (last menstrual period) and EDD (expected delivery date), and the attending doctor.
+      Clearly built for the gynae/obstetrics workflow. Currently EMPTY (0 rows) — unused so far
+      in this pilot.
+    columns:
+      anc_number:
+        description: Auto-generated antenatal-care case number; the primary key (bigserial), not a hospital-issued id.
+      uhid:
+        description: Hospital UHID; links to patients.uhid by value (no FK constraint).
+        sensitive: true
+      patient_name:
+        sensitive: true
+      guardian_name:
+        sensitive: true
+      address:
+        sensitive: true
+      phone_number:
+        description: Stored as bigint, not text.
+        sensitive: true
+      age:
+        sensitive: true
+      occupation:
+        sensitive: true
+      lmp:
+        description: Last menstrual period date (pregnancy dating).
+        sensitive: true
+      edd:
+        description: Expected date of delivery.
+        sensitive: true
+      doctor_name:
+        sensitive: true
+    join_hints:
+      - uhid matches patients.uhid by value (no FK constraint)
+
+  doctors:
+    description: >
+      Reference table of hospital doctors (name plus department). Referenced by appointments,
+      disposition_escalations, nursing_visit_log, and patient_visits via doctor_id. Currently
+      EMPTY (0 rows) — in practice doctor identity lives in denormalized text columns such as
+      patient_visits.doctor_name, so joins to this table will return nothing today.
+    columns:
+      name:
+        sensitive: true
+      department_id:
+        description: FK to departments; the doctor's home department.
+
+  # ── prescriptions-appointments (4 tables) — repaired ──────────────
+  prescriptions:
+    description: >
+      One row per prescription record captured for a patient at a hospital center — the
+      core clinical document that drives the patient-workflow pipeline. A prescription is
+      uploaded (image/PDF or Excel import), OCR/AI-extracted into structured data, optionally
+      verified by staff, and can flag inpatient (IP) admission advice that feeds downstream
+      follow-up calling and escalation workflows. Links to the patient, the center, and the
+      uploading/processing/verifying staff users; patient_visits and prescription_files
+      reference it (roughly one file per prescription, ~53k rows).
+    columns:
+      status:
+        description: Processing outcome of the prescription pipeline (uppercase enum), not a clinical status.
+        values: [COMPLETED, FAILED, ESCALATED]
+      prescription_type:
+        description: Source form of the document; NULL for some rows.
+        values: [digital, handwritten]
+      escalation_status:
+        description: Sparse; the only observed value is "Unreadable", used as a data-quality flag when the document could not be read. Mostly NULL.
+        values: [Unreadable]
+      escalation_level:
+        description: All NULL in current data; purpose unclear (likely reserved for escalation severity).
+      extraction_method:
+        description: How structured data was produced from the document.
+        values: [excel_import, "agent:upload_prescription_workflow_cancer", manual]
+      ip_admission_advised:
+        description: Boolean flag that the prescribing doctor advised inpatient (IP) admission — the key trigger for follow-up/conversion workflows. Observed values are NULL or true (never false).
+      form_data:
+        description: JSONB of the structured prescription form as entered/extracted (medications, advice, clinical details).
+        sensitive: true
+      extracted_data:
+        description: JSONB raw OCR/AI extraction output of the prescription content.
+        sensitive: true
+      patient_form_data:
+        description: JSONB of patient-related fields captured alongside the prescription (demographics/contact details).
+        sensitive: true
+      escalation_notes:
+        description: Free-text staff notes about why the prescription was escalated.
+        sensitive: true
+      prescription_number:
+        description: Hospital-issued prescription identifier.
+        sensitive: true
+      is_verified:
+        description: Boolean; whether staff verified the extracted data (verified_by / verified_at record who and when). Both true and false occur.
+      confidence_score:
+        description: Numeric confidence of the automated extraction; quality_score is a separate quality metric.
+      content_hash:
+        description: Hash of document content used for de-duplication; clinical_fingerprint is a similar dedup hash of clinical content.
+
+  prescription_files:
+    description: >
+      One row per uploaded prescription document file (image or PDF) stored in cloud storage
+      (Google Cloud Storage). Tracks the upload, its storage location, and the OCR/AI extraction
+      lifecycle for that file — processing status, timings, errors, extracted JSON, and a
+      confidence score. Nearly 1:1 with prescriptions (~53k rows each) via prescription_id;
+      uploaded_by links to the staff user who uploaded it.
+    columns:
+      processing_status:
+        description: File-level extraction pipeline state (uppercase enum).
+        values: [PENDING_UPLOAD, PENDING, COMPLETED, FAILED]
+      file_type:
+        description: Inconsistent — mixes a generic label ("image") with MIME strings. Despite the inconsistency, this is the column to filter on for file format.
+        values: [image, application/pdf, image/png, image/jpeg, image/webp]
+      mime_type:
+        description: Populated on ~99.6% of rows but effectively constant — the only observed value is image/png even for PDFs/JPEGs/WebP, so it does not reflect the true file format. Do not use it for format filtering; filter on file_type instead.
+        values: [image/png]
+      storage_provider:
+        description: Cloud storage backend; only Google Cloud Storage in use.
+        values: [gcs]
+      extraction_method:
+        description: Pipeline/agent that performed extraction; mostly NULL.
+        values: ["agent:upload_prescription_workflow_cancer"]
+      extracted_data:
+        description: JSONB OCR/AI extraction output for this file (clinical content).
+        sensitive: true
+      filename:
+        description: Stored filename; may embed patient identifiers.
+        sensitive: true
+      original_filename:
+        description: Filename as uploaded by staff; may embed patient identifiers.
+        sensitive: true
+      storage_url:
+        description: Direct URL to the file in cloud storage.
+        sensitive: true
+      storage_path:
+        description: Object path within the storage bucket.
+        sensitive: true
+      processing_error:
+        description: Free-text error message when extraction failed.
+      is_valid:
+        description: File validity flag; only true observed in current data.
+
+  appointments:
+    description: >
+      One row per scheduled hospital appointment for a patient — typically the follow-up or
+      admission appointment booked as an outcome of the patient-workflow (IP-recommendation)
+      pipeline. Small table (~183 rows) linking a patient, optionally a doctor, a source
+      visit (patient_visits), and a workflow. Tracks the full lifecycle with per-transition
+      audit columns: who created, completed, cancelled, or marked it no-show, and when.
+      Supports reschedule chains via a self-reference (rescheduled_from_id points to the
+      prior appointment row) plus reschedule_count. Appointment dates range April 2026 to
+      May 2027.
+    columns:
+      status:
+        description: Lifecycle state of the appointment (lowercase enum). No-shows are captured via no_show_at rather than a distinct status value in current data.
+        values: [scheduled, completed, cancelled, rescheduled]
+      urgency:
+        description: All NULL in current data; purpose unclear (likely intended priority label).
+      revenue_potential:
+        description: Integer estimate of revenue the hospital expects from this appointment/admission — used for conversion analytics.
+      appointment_code:
+        description: Hospital-facing booking code for the appointment.
+      rescheduled_from_id:
+        description: Self-FK to the earlier appointment this one replaced; follow the chain to reconstruct reschedule history.
+      no_show_at:
+        description: Timestamp when the patient was marked a no-show (marked_by_id records the staff user).
+      notes:
+        description: Free-text staff notes about the appointment.
+        sensitive: true
+      cancellation_reason:
+        description: Free-text reason entered on cancellation.
+        sensitive: true
+
+  reminders:
+    description: >
+      One row per personal follow-up reminder a hospital staff user sets against a patient —
+      a lightweight to-do ("call this patient back on date X") used in the ops dashboard, not
+      an automated patient-facing notification. Small table (~149 rows). user_id is the staff
+      member who owns the reminder; status moves from pending to completed or dismissed, with
+      completed_at / dismissed_at timestamps.
+    columns:
+      status:
+        values: [pending, completed, dismissed]
+      patient_type:
+        description: Category of patient the reminder targets. Column default is 'ip_recommendation_patient' but only 'patient' is observed; effectively constant in current data.
+        values: [patient]
+      title:
+        description: Short free-text label of what the reminder is about; can contain patient details.
+        sensitive: true
+      notes:
+        description: Free-text detail for the reminder; can contain patient/medical details.
+        sensitive: true
+      reminder_date:
+        description: When the reminder is due (drives the staff dashboard's due/overdue lists). Observed range April–July 2026.
+
+  # ── calls (4 tables) — repaired ───────────────────────────────────
+  call_history:
+    description: >
+      Manual call-disposition log kept by hospital staff (NI callers / coordinators). One row is
+      one logged call attempt or interaction outcome against a patient: who logged it
+      (created_by_id -> users), the outcome (call_status), the reason hierarchy
+      (call_reason / call_sub_reason), free-text remarks, and an optional follow-up date.
+      Rows can be tied to a workflow and to a disposition escalation, and via entity_type the
+      call can be logged in the context of a patient, a task item, or a disposition escalation.
+      ~12.5k rows, Mar 2026 to present. This is the staff-entered outcome record, distinct from
+      patient_call_records which is the telephony provider's CDR.
+    columns:
+      call_status:
+        description: >
+          Outcome/disposition of the call attempt. Note casing inconsistency: both
+          'connected' and 'Connected' occur and must be matched case-insensitively.
+        values: [Connected, connected, fitness_case_transfer, follow_up, in_progress, not_connected, not_interested, resolved, transferred]
+      call_reason:
+        description: Reason category for the call (varchar 200). Not sampled (name outside sampling allowlist); treat as short categorical/semi-free text.
+      call_sub_reason:
+        description: Sub-reason under call_reason (varchar 200); same caveat as call_reason.
+      remarks:
+        description: Free-text notes written by the caller about the conversation; may contain medical/personal details.
+        sensitive: true
+      follow_up_date:
+        description: When the staff member scheduled the next follow-up attempt; NULL when no follow-up planned.
+      entity_type:
+        description: >
+          What kind of entity this call log is attached to (polymorphic context). patient_id and
+          escalation_id are dedicated columns covering the 'patient' and 'disposition_escalation'
+          cases; only the task_item case lacks a dedicated id column (its id likely lives in
+          meta_data).
+        values: [disposition_escalation, patient, task_item]
+      meta_data:
+        description: JSONB grab-bag of call context (not sampled); likely holds the referenced entity id for entity_type='task_item' and other UI-supplied context.
+        sensitive: true
+      created_by_id:
+        description: Staff user who logged the call (FK to users.id, varchar Firebase-style id).
+      escalation_id:
+        description: Set when the call was made as part of handling a disposition escalation (FK to disposition_escalations).
+
+  patient_call_records:
+    description: >
+      Telephony call-detail records (CDRs) ingested from the phone provider (Acefone). One row is
+      one actual phone call leg: direction (inbound/outbound/clicktocall), answered/missed status,
+      duration and billing (call_duration, answered_seconds, minutes_consumed, charges), agent and
+      patient phone numbers, hangup cause, plus AI-generated summary_text and transcript_text of the
+      recording. Rows are matched to a patient after ingestion (patient_id nullable; link_status
+      'linked' vs 'unresolved', link_source e.g. phone_fallback = matched by phone number).
+      ~2.9k rows since Jun 2026. This is the ground-truth telephony record, complementing the
+      staff-entered call_history table; there is no FK between the two.
+    columns:
+      provider:
+        description: Telephony vendor the CDR came from.
+        values: [acefone]
+      provider_call_id:
+        description: Provider-side unique call identifier; the natural key for deduplicating webhook deliveries.
+      direction:
+        description: Call direction; 'clicktocall' is an agent-initiated outbound call placed from the app UI.
+        values: [clicktocall, inbound, outbound]
+      status:
+        description: Provider-reported connection outcome. 'test' rows exist and should be excluded from real analytics.
+        values: [answered, missed, test]
+      service:
+        description: >
+          Provider service/channel label for the call. Occasionally suffixed with the
+          agent's name (pattern "Agent: <name>"), so raw values can embed staff names;
+          match on the base label prefix rather than exact equality.
+        values: [Agent, ClickToCall]
+        sensitive: true
+      call_hint:
+        description: Secondary provider hint about call origin.
+        values: [clicktocall, inbound]
+      reason:
+        description: Provider-supplied call reason/label (varchar 255). Not sampled (name outside sampling allowlist); treat as short categorical/semi-free text like call_history.call_reason.
+      link_status:
+        description: Whether the CDR was successfully matched to a patient. 'unresolved' rows have no patient_id.
+        values: [linked, unresolved]
+      link_source:
+        description: How the patient match was made; phone_fallback = matched by phone number lookup.
+        values: [phone_fallback]
+      hangup_cause:
+        description: >
+          Raw telephony hangup cause from the provider; inconsistent casing/wording
+          (e.g. 'Normal Clearing', 'Normal clearing', 'NORMAL_CLEARING'; 'User busy' vs 'USER_BUSY').
+          Other observed values include No answer, Call rejected, Number In DND, Subscriber absent,
+          No user response, Unallocated, Network out of order, Protocol error, No route destination,
+          Destination out of order, Interworking, UNSPECIFIED.
+      call_duration:
+        description: Total call duration in seconds (ring + talk).
+      answered_seconds:
+        description: Talk time in seconds after answer; 0/NULL for missed calls. Prefer this over call_duration for talk-time analytics.
+      minutes_consumed:
+        description: Billed minutes per provider rounding.
+      charges:
+        description: Provider billing amount for the call.
+      description:
+        description: Short AI/provider-generated description of the call content.
+        sensitive: true
+      detailed_description:
+        description: Longer free-text description of the call content.
+        sensitive: true
+      summary_text:
+        description: AI-generated summary of the call recording.
+        sensitive: true
+      transcript_text:
+        description: Full call transcript text.
+        sensitive: true
+      provider_recording_url:
+        description: URL to the audio recording on the provider side.
+        sensitive: true
+      agent_name:
+        sensitive: true
+      agent_number:
+        sensitive: true
+      agent_number_with_prefix:
+        sensitive: true
+      client_number:
+        description: The patient/customer phone number on the call.
+        sensitive: true
+      did_number:
+        description: The hospital's DID (dial-in) number used for the call.
+        sensitive: true
+      caller_id_num:
+        sensitive: true
+      matched_phone:
+        description: The phone number that was used to link this CDR to a patient.
+        sensitive: true
+      raw_payload:
+        description: Full raw provider webhook payload (JSONB); contains phone numbers and call metadata.
+        sensitive: true
+      lead_id:
+        description: Provider-side lead/campaign identifier (no FK in this DB).
+      department_name:
+        description: Hospital department the call was routed for; plain text, matches departments.name / department_coordinator_mappings.department_name (no FK).
+      call_date:
+        description: Provider-reported calendar date of the call (separate from created_at, which is ingestion time).
+
+  patient_call_record_assets:
+    description: >
+      Files produced from a phone call, one row per artifact attached to a patient_call_records row
+      (call_record_id FK): the audio recording and the generated summary document. Tracks where the
+      file lives in object storage (GCS bucket/path/URL), its mime type and size, and the state of the
+      processing pipeline (pending -> processing -> completed / failed) with timestamps and error text.
+      ~3.3k rows, roughly one recording plus one summary per recorded call.
+    columns:
+      asset_type:
+        description: Kind of artifact - 'recording' is the call audio (audio/mp3), 'summary' is the generated summary document (application/json).
+        values: [recording, summary]
+      storage_provider:
+        description: Object storage backend.
+        values: [gcs]
+      processing_status:
+        description: Pipeline state for fetching/generating the asset. Default 'pending'; observed terminal/in-flight states below.
+        values: [completed, failed, processing]
+      mime_type:
+        values: [audio/mp3, application/json]
+      storage_path:
+        description: Object path within the bucket; identifies a patient call recording.
+        sensitive: true
+      storage_url:
+        description: URL to the stored recording/summary file.
+        sensitive: true
+      processing_error:
+        description: Free-text error message when processing_status='failed'.
+      meta_data:
+        description: JSONB with provider/processing context (not sampled).
+        sensitive: true
+
+  call_derived_analytics:
+    description: >
+      Structured, per-call analytics derived (by AI) from a call, one row per call_history row
+      (call_history_id FK) and patient. Designed to capture maternity/commercial funnel signals:
+      journey_stage, package_interest, payment_mode, revenue_segment, blocker_code, next action
+      (type/date/window), commitment_level, churn_risk, conversion_flag, follow_up_required,
+      priority_score, and pregnancy/booking flags. Currently EMPTY (0 rows) - the schema exists but
+      the pipeline has not populated it yet, so all value lists are unobserved and column meanings
+      are inferred from names only.
+    columns:
+      journey_stage:
+        description: Patient's stage in the care/sales journey (unobserved - table empty).
+      package_interest:
+        description: Which hospital package (e.g. maternity/delivery package) the patient expressed interest in.
+      revenue_segment:
+        description: Revenue potential classification of the patient.
+      blocker_code:
+        description: Coded reason blocking conversion (e.g. price, competitor) - values unobserved.
+      next_action_type:
+        description: Recommended follow-up action type; paired with next_action_date and next_action_window.
+      commitment_level:
+        description: How committed the patient sounded on the call.
+      churn_risk:
+        description: Risk the patient drops out of the funnel.
+      conversion_flag:
+        description: Whether the call indicates the patient converted (booked/paid).
+      priority_score:
+        description: Numeric prioritization score for follow-up worklists.
+      is_pregnant:
+        description: Health status flag derived from the call.
+        sensitive: true
+      has_scans_booked:
+        description: Whether antenatal scans are booked.
+        sensitive: true
+      has_delivery_booked:
+        description: Whether a delivery package/admission is booked.
+        sensitive: true
+      derived_payload:
+        description: Full raw AI-derived analytics JSON for the call; may contain medical details.
+        sensitive: true
+
+  # ── escalations-core (9 tables) ────────────────────────
+  escalations:
+    description: >
+      Core escalation ticket table (~1,465 rows, Apr–Jul 2026). One row is a single escalation
+      raised for a patient case (or a daily team digest) — typically because a patient-call
+      disposition like "cost help" or "insurance approval pending" was not acted on in time.
+      It carries a denormalized patient snapshot (UHID, name, consultant, department, call
+      reason/sub-reason), the outbound email that notified staff (to/cc/bcc, header, sent flags),
+      resolution fields (resolved_by/at, remarks, turnaround time), and links to the
+      escalation_rules row that fired it, plus hospital, center and workflow. escalation_history
+      and escalation_email_replies hang off this table.
+    columns:
+      escalation_id:
+        description: Human-readable business key (varchar) distinct from the uuid PK; escalation_email_replies joins on this, not on id.
+      uhid:
+        description: Hospital's Unique Health ID of the patient.
+        sensitive: true
+      patient_name:
+        sensitive: true
+      patient_age:
+        sensitive: true
+      patient_gender:
+        values: [MALE, FEMALE]
+      patient_number:
+        description: Patient phone number.
+        sensitive: true
+      consultant_name:
+        description: Treating doctor's name.
+        sensitive: true
+      consultant_department:
+        description: Department of the treating consultant, e.g. cardiology; useful group-by for analytics.
+      payor_type:
+        description: Payment category of the patient (cash/insurance etc.); all NULL in current data.
+      call_reason:
+        description: Disposition/reason from the patient call that triggered the escalation.
+        values: [cost_help, insurance_loan_pending, not_interested, second_opinion, team_consolidated, waiting_for_doctor_reports]
+      call_sub_reason:
+        description: Finer-grained sub-disposition under call_reason. Nullable — NULL when no sub-reason was captured.
+        values: [insurance_approval_pending, negative_feedback, waiting_estimate, loan_approval_pending, discount_asked, doctor_ok_pending, report_pending, other]
+      remarks:
+        sensitive: true
+      prescription_images:
+        description: Array of prescription image URLs attached to the escalation.
+        sensitive: true
+      to_emails:
+        sensitive: true
+      cc_emails:
+        sensitive: true
+      bcc_emails:
+        sensitive: true
+      from_email:
+        sensitive: true
+      escalation_header:
+        description: Subject/header line of the escalation email; usually embeds patient identifiers.
+        sensitive: true
+      agent_email:
+        sensitive: true
+      coordinator_name:
+        sensitive: true
+      status:
+        description: Lifecycle status of the escalation. Only 'open' observed — nothing has been marked resolved in this dataset yet.
+        values: [open]
+      resolved_by:
+        description: Free-text identifier of the resolver (varchar 255, no FK to users) — may be a name or email.
+        sensitive: true
+      resolution_remarks:
+        sensitive: true
+      resolution_attachment_url:
+        sensitive: true
+      auto_resolved:
+        description: True if closed automatically by a status-change rule; all false in current data.
+      nlp_confidence:
+        description: Confidence score from NLP analysis of an email reply used for auto-resolution.
+      nlp_keywords:
+        description: Keywords the NLP layer extracted from replies; may contain clinical text.
+        sensitive: true
+      turnaround_time_seconds:
+        description: Resolution TAT in seconds (created -> resolved); the metric for "how fast are escalations closed".
+      turnaround_time_human:
+        description: Same TAT pre-formatted as a display string, e.g. "2 hours".
+      payload:
+        description: Full jsonb snapshot of the triggering context (patient/task data); contains PII.
+        sensitive: true
+      email_sent:
+        description: Whether the escalation notification email actually went out; email_error holds the failure text.
+      email_error:
+        description: Failure text from the mailer when email_sent is false; error strings typically embed recipient email addresses.
+        sensitive: true
+      escalation_type:
+        description: What kind of escalation this is - a per-patient escalation vs a consolidated daily team digest.
+        values: [patient, daily_team_digest]
+      trigger_type:
+        description: How it was raised - time-based SLA breach vs a status change; manual not observed.
+        values: [auto_time_based, auto_status_change]
+      trigger_reason:
+        description: Free-text explanation of why the rule fired.
+        sensitive: true
+      entity_id:
+        description: Polymorphic reference - uuid of the entity named in entity_type (e.g. a patient row); no FK constraint.
+      entity_type:
+        description: Type of the escalated entity.
+        values: [patient, daily_team_digest]
+      priority:
+        values: [medium, high, urgent]
+      escalation_level:
+        description: Escalation-matrix tier (L1 = first level). Only 'L1' observed - no case has been bumped to L2+.
+        values: [L1]
+      assigned_to:
+        description: users.id of the staff member the escalation is assigned to.
+      due_date:
+        description: SLA deadline; is_overdue flags breaches (all false currently).
+    join_hints:
+      - "entity_id holds the uuid of the row named by entity_type (patients.id when entity_type = 'patient'); polymorphic, no FK constraint"
+
+  escalation_history:
+    description: >
+      Audit trail of escalations (~1,463 rows). One row records one action taken on an
+      escalation, with jsonb before/after snapshots (old_value/new_value) and who made the
+      change. In current data every row has action = 'created', so it effectively mirrors
+      escalation creation events; update/resolve actions would land here too. Joins to
+      escalations via escalation_db_id (the uuid PK, not the business escalation_id).
+    columns:
+      escalation_db_id:
+        description: FK to escalations.id (uuid PK) - note the "_db_" naming distinguishing it from the varchar business key escalation_id.
+      action:
+        description: What happened to the escalation. Only 'created' observed so far.
+        values: [created]
+      old_value:
+        description: jsonb snapshot before the change; may embed patient data.
+        sensitive: true
+      new_value:
+        description: jsonb snapshot after the change; may embed patient data.
+        sensitive: true
+      remarks:
+        sensitive: true
+      changed_by:
+        description: users.id of the actor; NULL for system/automated actions.
+
+  escalation_rules:
+    description: >
+      Configuration of when and how escalations fire (~8 rows). One row is a rule such as
+      "COST_HELP_URGENT1" or "daily_team_consolidated_digest": jsonb conditions to match,
+      timing (trigger_delay_minutes, cooldown_minutes, sla_hours), routing (escalate_to_role /
+      escalate_to_user, escalation_matrix, email_config), and auto-resolution behaviour.
+      escalations.rule_id points back here, so joining lets you slice escalation volume by rule.
+    columns:
+      rule_code:
+        description: Stable machine code for the rule; observed codes map closely to escalations.call_reason values (not_interested splits into OP/IP variants) plus digest rules.
+        values: [NOT_INTERESTED_OP1, NOT_INTERESTED_IP1, COST_HELP_URGENT1, INSURANCE_APPROVAL_PENDING1, SECOND_OPINION_REQ1, WAITING_FOR_DOCTOR_REPORT1, multi_workflow_daily_tasks, daily_team_consolidated_digest]
+      task_type:
+        description: Task category the rule targets; all NULL in current data.
+      escalation_type:
+        description: Whether the rule raises per-patient escalations or task/digest escalations.
+        values: [patient, task]
+      conditions:
+        description: jsonb predicate defining when the rule matches (e.g. disposition + elapsed time).
+      escalate_to_role:
+        description: Role to notify (all NULL currently - routing goes via escalation_matrix/email_config instead).
+      escalation_matrix:
+        description: jsonb per-level routing config (who gets L1, L2, ... notifications); embeds staff email addresses/recipients.
+        sensitive: true
+      email_config:
+        description: jsonb email settings (recipients, templates) for notifications sent by this rule; embeds staff email addresses.
+        sensitive: true
+      sla_hours:
+        description: Hours allowed before the escalation is considered overdue.
+      auto_resolve_on_status_change:
+        description: If true, the escalation closes automatically when the underlying entity reaches one of auto_resolve_statuses.
+      department_ids:
+        description: Array of department uuids the rule is scoped to (no FK constraint on array elements).
+      is_active:
+        values: ["true", "false"]
+
+  escalation_configs:
+    description: >
+      Tiny key-value settings store for the escalation module (~2 rows). One row is one named
+      config (config_key) with a jsonb value - observed keys are 'escalation_enabled' (global
+      on/off switch) and 'email_subject_prefix'. Not analytics data; used by the application
+      at runtime.
+    columns:
+      config_key:
+        values: [escalation_enabled, email_subject_prefix]
+      config_value:
+        description: jsonb value for the setting.
+
+  escalation_matrices:
+    description: >
+      Versioned escalation-matrix definitions per hospital - jsonb matrix of who to notify at
+      each escalation level, plus department_mapping and global_settings. Currently EMPTY
+      (0 rows): in practice the matrix lives inline in escalation_rules.escalation_matrix,
+      so treat this table as unused/planned.
+    columns:
+      matrix_key:
+        description: Named identifier of a matrix definition; paired with version for versioning.
+      matrix:
+        description: jsonb level-by-level routing definition (L1/L2/... recipients); would embed staff email addresses if populated.
+        sensitive: true
+      department_mapping:
+        description: jsonb mapping of departments to matrix branches.
+
+  escalation_rule_versions:
+    description: >
+      Version history for escalation_rules - each row would snapshot a rule's full definition
+      (conditions, routing, timing) with a version number, change_reason and changed_by.
+      Currently EMPTY (0 rows); rules have not been edited through the versioning path.
+    columns:
+      rule_id:
+        description: FK to escalation_rules.id - the rule this snapshot belongs to.
+      change_reason:
+        description: Free-text reason the rule was changed.
+    join_hints:
+      - "center_id holds centers.id (no FK constraint, unlike escalation_rules.center_id which has one)"
+
+  escalation_run_states:
+    description: >
+      Run ledger for scheduled digest-style escalation jobs. One row would record one execution
+      of a workflow/bucket run (run_date, run_time, total_tasks counted, jsonb breakdown,
+      whether the digest email was sent or the run was skipped and why). Currently EMPTY
+      (0 rows) - useful mainly to check whether daily digests actually ran.
+    columns:
+      workflow_code:
+        description: Code of the workflow the run belongs to (string code, not a uuid FK).
+      bucket_code:
+        description: Sub-bucket of tasks within the workflow that this run processed.
+      breakdown:
+        description: jsonb per-category counts of the tasks included in the run.
+      skip_reason:
+        description: Why the run was skipped (e.g. no tasks), when skipped = true.
+    join_hints:
+      - "workflow_code holds workflows.code (string business code, no FK constraint)"
+
+  escalation_email_replies:
+    description: >
+      Inbound email replies to escalation notification emails (~1 row). One row is one reply
+      captured from the mailbox, linked to its escalation via the varchar business key
+      escalation_id (escalations.escalation_id, not the uuid PK), with full email headers/body
+      and an nlp_analysis jsonb used to decide auto-resolution of the escalation.
+    columns:
+      escalation_id:
+        description: Joins to escalations.escalation_id (varchar business key), not escalations.id.
+      from_email:
+        sensitive: true
+      to_emails:
+        sensitive: true
+      subject:
+        sensitive: true
+      body:
+        description: Full reply body; free text, likely contains patient details.
+        sensitive: true
+      message_id:
+        description: RFC-822 Message-ID header; in_reply_to and references support threading.
+      nlp_analysis:
+        description: jsonb NLP output (intent/confidence/keywords) used for auto-resolving the escalation.
+        sensitive: true
+    join_hints:
+      - "escalation_id joins to escalations.escalation_id, the varchar business key (no FK constraint; do not join on escalations.id)"
+
+  legacy_escalation_rules:
+    description: >
+      Deprecated predecessor of escalation_rules, kept from an earlier task-centric design
+      (task_type was mandatory, no rule_code/escalation_matrix/email_config columns).
+      EMPTY (0 rows) and nothing references it - exclude from analytics; use escalation_rules
+      instead.
+    columns:
+      task_type:
+        description: Task category the legacy rule targeted (mandatory here, unlike escalation_rules).
+
+  # ── disposition-escalations (5 tables) ─────────────────
+  disposition_escalations:
+    description: >
+      One row per escalation raised off a call disposition — when an NI/outbound calling
+      agent records an outcome that needs a specialist handler (e.g. a financial concern
+      or a pending insurance loan), an escalation ticket is created here for a patient
+      (optionally tied to a specific visit/encounter and doctor). The row tracks the full
+      ticket lifecycle: who raised it, who it is assigned to, the TAT (turnaround-time)
+      deadline derived from disposition_escalation_configs, whether the TAT was breached,
+      whether it was escalated to CXO leadership, and how/when it was resolved. Child
+      tables record the event timeline, reminder nudges, and file attachments; call_history
+      rows can link back to an escalation via call_history.escalation_id.
+    columns:
+      escalation_type:
+        description: Category of the disposition that triggered the escalation.
+        values: [financial_concern, insurance_loan_pending]
+      status:
+        description: >
+          Ticket lifecycle state (enum disposition_escalation_status, default 'open').
+          Observed values below; 'open' is the default for new tickets but no open rows
+          existed at sampling time. 'breached' means the TAT deadline passed unresolved;
+          'not_interested' means the patient declined further follow-up.
+        values: [resolved, breached, not_interested]
+      tat_deadline:
+        description: Deadline by which the handler must resolve the escalation, computed from the config's tat_minutes at creation.
+      breached_at:
+        description: Timestamp when the TAT deadline was missed; NULL if resolved in time.
+      resolved_at:
+        description: When the escalation was closed as resolved.
+      resolution_note:
+        description: Free-text note entered by the handler at resolution.
+        sensitive: true
+      cxo_escalated:
+        description: True if the ticket was further escalated to CXO/leadership after breach.
+      cxo_escalated_at:
+        description: When the CXO escalation happened.
+      nudge_count:
+        description: Number of reminder nudges sent for this ticket (denormalized count of disposition_escalation_nudges).
+      warning_sent:
+        description: Whether a pre-breach TAT warning notification was sent to the handler.
+      remarks:
+        description: Free-text remarks about the escalation.
+        sensitive: true
+      follow_up_at:
+        description: Scheduled follow-up time when the patient asked to be contacted later.
+      not_connected_at:
+        description: Timestamp when a contact attempt failed to reach the patient (drives re-try flow).
+      created_by:
+        description: users.id of the agent who raised the escalation (varchar user id, FK to users).
+      assigned_to:
+        description: users.id of the handler currently responsible for resolving the ticket.
+      original_agent_id:
+        description: users.id of the original calling agent, preserved if the ticket was later transferred/reassigned.
+      encounter_id:
+        description: Optional link to the patient visit (patient_visits.id) the disposition came from.
+      config_id:
+        description: The disposition_escalation_configs row (center + escalation_type) whose TAT/handler rules applied at creation.
+    join_hints: []
+
+  disposition_escalation_events:
+    description: >
+      Append-only audit timeline for disposition escalations — one row per lifecycle event
+      on a ticket (created, assigned, nudge sent, follow-up scheduled, TAT breached,
+      escalated to CXO, transferred, resolved, etc.), with the actor who performed it and
+      their role. This is the table to use for "what happened to this escalation and when"
+      and for measuring time between lifecycle stages. Roughly 444 rows across ~119
+      escalations (a handful of events per ticket).
+    columns:
+      event_type:
+        description: The lifecycle action recorded.
+        values: [created, assigned, nudge_sent, follow_up, not_connected, breached, not_interested, cxo_escalated, transferred, resolved]
+      actor_role:
+        description: Role of whoever performed the action; 'system' marks automated events like TAT breach detection.
+        values: [agent, handler, cxo, system]
+      actor_id:
+        description: users.id of the human actor; NULL for system-generated events.
+      payload:
+        description: JSONB blob with event-specific detail (e.g. transfer targets, notes); shape varies by event_type.
+        sensitive: true
+    join_hints: []
+
+  disposition_escalation_nudges:
+    description: >
+      Reminder "nudges" sent about an open disposition escalation — one row per nudge from
+      one user (e.g. an agent or CXO chasing progress) to another (typically the assigned
+      handler), with the delivery channel, delivery status, and any response the recipient
+      gave. Very low volume so far (~5 rows). The parent ticket's nudge_count mirrors how
+      many nudges exist for it.
+    columns:
+      sent_by_role:
+        description: Role of the sender.
+        values: [agent, cxo]
+      channel:
+        description: Delivery channel of the nudge (enum disposition_nudge_channel, default 'push'); only push notifications observed.
+        values: [push]
+      delivery_status:
+        description: Delivery state of the nudge (enum, default 'pending'); only 'pending' observed.
+        values: [pending]
+      message:
+        description: Free-text nudge message from the sender.
+        sensitive: true
+      response_text:
+        description: Free-text reply from the recipient, if any.
+        sensitive: true
+      responded_at:
+        description: When the recipient responded to the nudge.
+      sent_by:
+        description: users.id of the sender; nullable (system-initiated nudges possible).
+      sent_to:
+        description: users.id of the recipient (usually the escalation's assigned handler).
+    join_hints: []
+
+  disposition_escalation_configs:
+    description: >
+      Per-center routing and SLA configuration for disposition escalations — one row per
+      (center, escalation_type) defining which user handles that escalation type, the TAT
+      in minutes before breach, and who gets notified on breach. New disposition_escalations
+      rows snapshot their rules from here via config_id. Tiny reference table (~3 rows).
+    columns:
+      escalation_type:
+        description: The disposition category this config governs. Note 'waiting_doctor_report' is configured but had no live escalations at sampling time.
+        values: [waiting_doctor_report, insurance_loan_pending, financial_concern]
+      handler_user_id:
+        description: users.id of the default handler that escalations of this type are assigned to.
+      tat_minutes:
+        description: Turnaround-time SLA in minutes (default 120) used to compute each ticket's tat_deadline.
+      is_active:
+        description: Whether this config is currently in force; only true observed.
+        values: [true]
+      breach_notification_user_ids:
+        description: JSONB array of users.id values to notify when a ticket of this type breaches TAT (no FK enforcement inside the array).
+    join_hints:
+      - breach_notification_user_ids is a jsonb array whose elements are users.id values (no FK constraint)
+
+  disposition_escalation_attachments:
+    description: >
+      Files attached to a disposition escalation ticket (e.g. supporting documents a
+      handler or agent uploads, such as insurance/finance paperwork) — one row per uploaded
+      file with its object-storage location, original filename, MIME type, and size. Only
+      PDFs observed so far; very low volume (~3 rows).
+    columns:
+      original_filename:
+        description: Filename as uploaded by the user; may reveal patient/document identity.
+        sensitive: true
+      storage_path:
+        description: Object-storage key/path of the file within bucket_name.
+        sensitive: true
+      bucket_name:
+        description: Object-storage bucket holding the file.
+      mime_type:
+        values: [application/pdf]
+      uploaded_by:
+        description: users.id of the uploader (varchar user id).
+    join_hints: []
+
+  # ── whatsapp (7 tables) ────────────────────────────────
+  whatsapp_messages:
+    description: >
+      One row per WhatsApp message exchanged with a patient (inbound from the patient or
+      outbound from hospital staff / templates), mirrored into Kalaam from the external
+      Saheli WhatsApp backend (saheli_message_id + saheli_source_table point at the source
+      row there). Carries delivery lifecycle timestamps (sent/delivered/read/failed), the
+      message body or media reference, and an optional link to the WhatsApp escalation the
+      message belongs to. Use it for message volume, response-time, and delivery-failure
+      analytics. Currently near-empty (~1 row) in this pilot database.
+    columns:
+      saheli_message_id:
+        description: Primary key of the message row in the upstream Saheli system; with saheli_source_table it uniquely identifies the source record.
+      saheli_source_table:
+        description: Which Saheli table the message was synced from.
+        values: [wa_inbound_messages]
+      direction:
+        description: Whether the message came from the patient or was sent to them.
+        values: [inbound]
+      sender_role:
+        description: Role of whoever sent the message (patient for inbound; staff roles expected for outbound).
+        values: [patient]
+      message_type:
+        description: WhatsApp content type (text default; media/template/unsupported etc.).
+        values: [unsupported]
+      status:
+        description: Delivery status of the message. Only RECEIVED observed (inbound); outbound statuses like sent/delivered/read/failed are implied by the *_at timestamp columns.
+        values: [RECEIVED]
+      body:
+        description: Free-text message content, may contain medical information.
+        sensitive: true
+      phone:
+        sensitive: true
+      template_id:
+        description: WhatsApp Business template name used for templated outbound messages (external template identifier, no FK).
+      template_variables:
+        description: JSONB of variable substitutions for the template; may embed patient names.
+        sensitive: true
+      wamid:
+        description: WhatsApp platform message id (Meta's message identifier), useful for deduplication against webhook events.
+      intent:
+        description: Classified intent of the message (NULL in the only sampled row); populated by the chatbot/classifier.
+      is_internal_note:
+        description: True when the row is a staff-only internal note on the conversation, not an actual WhatsApp message sent to the patient.
+      error_code:
+        description: WhatsApp/Meta error code when delivery failed (pairs with failed_at and error_message).
+      raw_payload:
+        description: Full raw webhook/API payload as JSONB.
+        sensitive: true
+    join_hints:
+      - "tenant_id identifies the Saheli tenant/hospital scope; uuid with no FK constraint in this DB (external Saheli concept, likely corresponds to a hospital)"
+      - "template_id is an external WhatsApp template name, not a local table reference"
+
+  whatsapp_escalations:
+    description: >
+      One row per patient escalation raised over WhatsApp — a case where the chatbot (or a
+      manual trigger) flagged a patient's WhatsApp conversation as needing human attention,
+      synced from the Saheli WhatsApp backend (saheli_escalation_id, synced_from_saheli_at,
+      sync_version). Tracks the full case lifecycle: classification (escalation_type,
+      category, severity, priority, emergency flag), assignment to a staff user, SLA due
+      time, unread inbound count, and resolution/closure. It is the hub of the WhatsApp
+      escalation workflow: messages, timeline events, and the per-patient state table all
+      point at it. Table is empty in this pilot database, so status/type values could not
+      be sampled (defaults: status 'open', priority 3, trigger_source 'chatbot').
+    columns:
+      saheli_escalation_id:
+        description: Id of the escalation in the upstream Saheli system (sync key).
+      escalation_ref:
+        description: Short human-readable case reference shown to staff (also denormalized into patient_whatsapp_state.latest_escalation_ref).
+      patient_uhid:
+        description: Denormalized hospital UHID of the patient.
+        sensitive: true
+      patient_name:
+        sensitive: true
+      phone:
+        sensitive: true
+      escalation_type:
+        description: Kind of escalation (varchar(50); no rows to sample).
+      follow_up_category:
+        description: Follow-up bucket the patient belongs to when the escalation was raised (unsampled).
+      procedure_category:
+        description: Clinical procedure category context for the escalation (unsampled).
+      procedure_subcategory:
+        description: Finer-grained procedure classification (unsampled).
+      category:
+        description: Short (varchar(20)) escalation category; distinct from escalation_type; unsampled.
+      emergency:
+        description: True when the case is flagged as a medical emergency; rolled up into patient_whatsapp_state.has_emergency.
+      severity:
+        description: Severity label (varchar(20), unsampled).
+      priority:
+        description: Numeric priority, smallint, default 3; lower/higher convention unverified. Rolled up into patient_whatsapp_state.highest_priority.
+      status:
+        description: Case lifecycle status; default 'open', with resolved_at/closed_at implying resolved and closed states. No rows to sample.
+      assigned_to_email:
+        description: Email of the assigned staff member (denormalized alongside assigned_to_user_id).
+        sensitive: true
+      confidence_score:
+        description: Classifier confidence (smallint) for the automated escalation decision; pairs with needs_manual_review.
+      needs_manual_review:
+        description: True when the automated classification is low-confidence and a human should re-triage.
+      trigger_source:
+        description: What raised the escalation; default 'chatbot'.
+      trigger_message:
+        description: The patient message text that triggered the escalation.
+        sensitive: true
+      reason:
+        sensitive: true
+      notes:
+        sensitive: true
+      ai_summary:
+        description: LLM-generated summary of the case/conversation.
+        sensitive: true
+      assignment_reason:
+        description: Free-text rationale for why the case was assigned to this user.
+        sensitive: true
+      wa_assignment_sync_pending:
+        description: True when an assignment made in Kalaam still needs to be pushed back to the Saheli WhatsApp backend (with last attempt timestamp and error columns alongside).
+      wa_resolution_sync_pending:
+        description: Same back-sync mechanism for resolution status.
+      conversation_id:
+        description: Saheli/WhatsApp conversation identifier (external, no FK).
+      source_inbound_id:
+        description: Id of the inbound Saheli message that spawned the escalation (external, no FK).
+      signals:
+        description: JSONB of classifier signals/flags extracted from the conversation.
+      unread_count:
+        description: Number of unread inbound patient messages on this case; drives the staff inbox badge.
+      sla_due_at:
+        description: Deadline by which the escalation should be handled; use vs resolved_at for SLA-breach analytics.
+      archived:
+        description: Soft-archive flag; archived cases are hidden from active queues.
+      sync_version:
+        description: Monotonic version from the Saheli sync, for idempotent upserts.
+    join_hints:
+      - "department_id and doctor_id are uuid columns with no FK constraint in the schema doc; they plainly reference the departments and doctors tables"
+      - "tenant_id is the Saheli tenant scope (no FK); hospital_id/center_id are the proper local FKs"
+      - "saheli_escalation_id / conversation_id / source_inbound_id reference rows in the external Saheli database, not local tables"
+
+  whatsapp_escalation_events:
+    description: >
+      Append-only audit timeline for WhatsApp escalations: one row per event on a case
+      (creation, status transition, assignment, note, resolution). from_status/to_status
+      capture state changes and actor_user_id/actor_role record who did it, so this is the
+      table for "who touched the case and when" and time-in-status analytics. Empty in this
+      pilot database, so event_type values could not be sampled.
+    columns:
+      event_type:
+        description: Kind of timeline event (varchar(40); unsampled, table empty).
+      from_status:
+        description: Escalation status before the transition (NULL for non-status events).
+      to_status:
+        description: Escalation status after the transition.
+      actor_role:
+        description: Role of the user/system that performed the action.
+      payload:
+        description: JSONB with event-specific detail.
+      note:
+        description: Free-text note attached to the event; may contain patient/medical content.
+        sensitive: true
+
+  whatsapp_media:
+    description: >
+      One row per media attachment (image, audio, document, etc.) received or sent over
+      WhatsApp, synced from Saheli (saheli_media_id). Stores the Meta media id, content
+      hash, size, storage locations (local path and Kalaam blob URL), and — for voice
+      notes/audio — an automatic transcription with language. whatsapp_messages.media_id
+      points here. processing_status and scanned_status track the transcription/processing
+      and (likely virus/content) scanning pipelines, both defaulting to 'pending'. Empty in
+      this pilot database.
+    columns:
+      saheli_media_id:
+        description: Id of the media row in the upstream Saheli system.
+      meta_media_id:
+        description: WhatsApp/Meta platform media identifier used to download the asset.
+      sha256:
+        description: Content hash for deduplication/integrity.
+      local_path:
+        description: Filesystem path of the stored asset.
+        sensitive: true
+      kalaam_blob_url:
+        description: Blob-storage URL of the asset inside Kalaam.
+        sensitive: true
+      transcription:
+        description: Speech-to-text transcript of audio media; free-text medical content.
+        sensitive: true
+      transcription_lang:
+        description: Language code of the transcription.
+      processing_status:
+        description: Media processing pipeline state; default 'pending' (no rows to sample further).
+      scanned_status:
+        description: Scanning (safety/malware) pipeline state; default 'pending'.
+      original_filename:
+        description: Filename supplied by the sender; may reveal patient identity.
+        sensitive: true
+    join_hints:
+      - "tenant_id is the Saheli tenant scope, uuid with no FK constraint"
+
+  whatsapp_messaging_permissions:
+    description: >
+      Access-control list of which hospital staff users are allowed to send WhatsApp
+      messages to patients. One row per grant: user_id is the grantee, granted_by the
+      admin who granted it, and a non-null revoked_at means the permission has been taken
+      away (rows are kept for audit rather than deleted). Empty in this pilot database.
+    columns:
+      revoked_at:
+        description: When the permission was revoked; NULL means the grant is still active — filter "revoked_at IS NULL" for currently-permitted users.
+      notes:
+        description: Free-text justification for the grant/revocation.
+        sensitive: true
+
+  whatsapp_settings:
+    description: >
+      Per-hospital configuration for the WhatsApp (Saheli) integration — essentially the
+      connection record between Kalaam and the external WhatsApp backend. One row per
+      hospital: backend URL, encrypted API keys, the tenant slug used on the Saheli side,
+      an is_active switch, and the result of the latest health check. Not an analytics
+      table; one row exists in this pilot database (is_active = true).
+    columns:
+      backend_url:
+        description: Base URL of the external Saheli WhatsApp backend for this hospital.
+        sensitive: true
+      integration_api_key_encrypted:
+        description: Encrypted API key for the integration endpoints; secret material.
+        sensitive: true
+      admin_api_key_encrypted:
+        description: Encrypted admin-level API key; secret material.
+        sensitive: true
+      tenant_slug:
+        description: Tenant identifier string used by the Saheli backend for this hospital.
+      is_active:
+        description: Whether the WhatsApp integration is enabled for this hospital.
+        values: [true]
+      last_health_status:
+        description: Result of the last connectivity health check (NULL in the only row; free-form text, not an enum).
+
+  patient_whatsapp_state:
+    description: >
+      One row per patient summarizing their current WhatsApp situation — a denormalized
+      rollup used for inbox/list views rather than a history table. Its primary key IS the
+      patient id (patients.id), and it tracks whether the patient has any active
+      escalations, how many, the highest priority among them, an emergency flag, a pointer
+      to the latest escalation, total unread inbound messages, and last-activity
+      timestamps. Refreshed as escalations/messages sync; empty in this pilot database.
+    columns:
+      id:
+        description: Not a surrogate key — this equals patients.id (one row per patient).
+      phone:
+        sensitive: true
+      has_active_escalation:
+        description: True while the patient has at least one open WhatsApp escalation.
+      active_escalation_count:
+        description: Number of currently active escalations for the patient.
+      highest_priority:
+        description: Highest priority among the patient's active escalations (mirrors whatsapp_escalations.priority).
+      has_emergency:
+        description: True if any active escalation is flagged emergency.
+      latest_escalation_ref:
+        description: Denormalized human-readable ref of the latest escalation (copy of whatsapp_escalations.escalation_ref).
+      total_unread_messages:
+        description: Unread inbound WhatsApp messages across the patient's conversations; drives inbox badges.
+      last_inbound_at:
+        description: Timestamp of the patient's most recent inbound message.
+      last_event_at:
+        description: Timestamp of the most recent activity of any kind on the patient's WhatsApp thread.
+    join_hints:
+      - "tenant_id is the Saheli tenant scope, uuid with no FK constraint"
+
+  # ── workflow-tasks (8 tables) — repaired ──────────────────────────
+  workflows:
+    description: >
+      Master registry of the hospital's operational workflows (care-program pipelines). One row
+      is one configured pipeline, e.g. OPD conversion, IPD, cancer, gynae/obstetrics, and
+      prescription-upload workflows. Nearly every operational table (patients, patient_visits,
+      visits_actions, call_history, escalations, appointments, task_types, workflow_statuses,
+      workflow_buckets) carries a workflow_id pointing here, so this is the top-level dimension
+      for slicing any analytics "by workflow". Only ~7 rows; it is configuration, not activity data.
+    columns:
+      workflow_code:
+        description: Machine code identifying the pipeline; the natural key used in filters and in task_snapshots.
+        values: [opd, ipd, cancer_workflow, gynae_workflow, upload_prescription_workflow, upload_prescription_workflow_cancer, upload_gynae_obs_workflow]
+      workflow_entity_type:
+        description: What kind of entity the workflow operates on.
+        values: [PATIENT, UPLOAD]
+      has_patient_view:
+        description: Whether the UI exposes a patient-centric list for this workflow (both true/false observed).
+      has_task_view:
+        description: Whether the UI exposes a task-centric list for this workflow (both true/false observed).
+      default_view:
+        description: Which view opens by default in the staff UI.
+        values: [PATIENT, TASK]
+      agent_config:
+        description: JSONB blob of agent/UI configuration for the workflow; opaque, not sampled.
+      priority:
+        description: Integer ordering/priority of the workflow (default 0).
+
+  workflow_statuses:
+    description: >
+      Catalog of the statuses (largely call/contact dispositions and funnel stages) that a patient
+      or task can be in within a given workflow. One row is one status definition, e.g.
+      "not_interested", "call_later", "admitted", "admission_booked". Statuses belong to a workflow,
+      may be grouped under a workflow_bucket (bucket_id), and can be nested via parent_status_id.
+      This is the lookup table behind disposition/status analytics; is_terminal marks statuses that
+      end the funnel (e.g. admitted, closed).
+    columns:
+      status_code:
+        description: Machine code of the status; heavily disposition-flavored (call outcomes and pipeline stages for the OPD-to-admission funnel). 84 rows total across workflows; sampled values shown.
+        values: [new, follow_up, call_later, busy, switch_off, couldnt_reach, invalid_number, wrong_number, no_number, not_interested, not_advised, on_medications, visited, admitted, admission_booked, closed_inquiry, cost_help, discount_asked, waiting_estimate, waiting_for_doctor_reports, report_pending, insurance_loan_pending, insurance_approval_pending, loan_approval_pending, medical_clearance_pending]
+      status_name:
+        description: Human-readable display label for the status (config label, not PII).
+      status_type:
+        description: Whether the status applies at the patient level or task level.
+        values: [PATIENT, TASK]
+      is_terminal:
+        description: True when the status closes the pipeline for that patient/task (both true/false observed).
+      is_initial_state:
+        description: Marks the default/entry status for a workflow.
+      parent_status_id:
+        description: Self-reference allowing sub-statuses to roll up to a parent status.
+      config:
+        description: JSONB blob with per-status UI/behavior configuration; opaque.
+
+  workflow_buckets:
+    description: >
+      Named groupings ("buckets") of statuses within a workflow — the columns/tabs staff see in the
+      task board, e.g. FRESH, FOLLOW_UP, NOT_CONNECTED, ADMITTED, ESCALATION. One row is one bucket
+      in one workflow (~49 rows across 7 workflows). workflow_statuses.bucket_id maps each status
+      into a bucket, so bucket-level counts (e.g. "how many patients in the Not Connected bucket")
+      roll up statuses through this table.
+    columns:
+      bucket_code:
+        description: Machine code of the bucket; the natural key also used (as text) in task_snapshots.
+        values: [FRESH, TODAYS, PENDING, FOLLOW_UP, NOT_CONNECTED, NOT_INTERESTED, ON_MEDICATIONS, VISITED, ADMITTED, ADMISSION_BOOKED, BOOKING, ESCALATION, COST_HELP, INSURANCE_LOAN_PENDING, MEDICAL_CLEARANCE_PENDING, WAITING_FOR_DOCTOR, SECOND_OPINION, PATIENT_VIEW]
+      bucket_name:
+        description: Human-readable display label for the bucket (config label, not PII).
+      bucket_type:
+        description: Categorization of the bucket (varchar(12)); not sampled beyond codes, values not confirmed.
+      is_visible:
+        description: Whether the bucket is shown in the staff UI.
+      config:
+        description: JSONB blob of bucket display/behavior configuration; opaque.
+
+  workflow_rules:
+    description: >
+      Rule-engine configuration table for workflows: each row would define an automation rule
+      (rule_code/rule_name, rule_type, JSONB trigger_conditions and actions, priority) attached to a
+      workflow. Currently EMPTY (0 rows) in this pilot database — the schema exists but no rules are
+      configured, so it will not answer any analytics question today.
+    columns:
+      rule_type:
+        description: Category of rule; no rows exist, so no observed values.
+      trigger_conditions:
+        description: JSONB conditions under which the rule fires; empty table.
+      actions:
+        description: JSONB actions the rule performs when triggered; empty table.
+
+  task_types:
+    description: >
+      Catalog of clinical/operational task categories that can be created for a patient within a
+      workflow — e.g. follow_up, medication, lab_test, procedure, chemotherapy, ip_admission
+      (~32 rows). Referenced by visits_actions.task_type_id (the actual tasks), and by
+      patient_schedules / schedule_occurrences for recurring care plans. Each task type carries a
+      default status and default bucket so new tasks land in the right place on the board.
+    columns:
+      task_type_code:
+        description: Machine code of the task category.
+        values: [follow_up, doctor_review, medication, lab_test, investigation, radiology_test, procedure, ip_admission, chemotherapy, radiation, physiotherapy, vaccination, referral, obstetrics]
+      task_type_name:
+        description: Human-readable display label (config label, not PII).
+      default_status_id:
+        description: workflow_statuses.id a newly created task of this type starts in.
+      default_bucket_id:
+        description: workflow_buckets.id a newly created task of this type appears under.
+      workflow_config:
+        description: JSONB per-task-type behavior configuration; opaque.
+      auto_create_reminder:
+        description: If true, creating a task of this type auto-schedules a reminder.
+
+  task_snapshots:
+    description: >
+      Intended as a daily aggregate snapshot of open-task counts per workflow and bucket
+      (snapshot_date, workflow_code, bucket_code, total_tasks, plus a task_breakdown JSONB).
+      Currently EMPTY (0 rows) in this pilot database, so it cannot serve historical trend queries
+      yet; live bucket counts must instead be computed from visits_actions/patients joined to
+      workflow_statuses and workflow_buckets.
+    columns:
+      workflow_code:
+        description: Text copy of workflows.workflow_code (no FK constraint).
+      bucket_code:
+        description: Text copy of workflow_buckets.bucket_code (no FK constraint).
+      task_breakdown:
+        description: JSONB per-status or per-type counts within the bucket; empty table, shape unobserved.
+    join_hints:
+      - "workflow_code holds workflows.workflow_code as text (no FK constraint)"
+      - "bucket_code holds workflow_buckets.bucket_code as text (no FK constraint)"
+
+  task_transfer_logs:
+    description: >
+      Audit trail of task reassignments between staff agents: one row records a visit-action (task)
+      for a patient being transferred from one agent to another, who performed the transfer, and
+      whether the new owner matched the department coordinator for the doctor involved. ~100 rows
+      spanning Apr–Jun 2026. Useful for workload-rebalancing and coordinator-routing accuracy
+      analytics.
+    columns:
+      visit_action_id:
+        description: The task (visits_actions row) that was moved.
+      patient_id:
+        sensitive: true
+      from_agent_id:
+        description: users.id of the agent losing the task (varchar Firebase-style user id).
+        sensitive: true
+      to_agent_id:
+        description: users.id of the agent receiving the task.
+        sensitive: true
+        sensitive: true
+      transferred_by_id:
+        description: users.id of the person who executed the transfer (may differ from either agent).
+        sensitive: true
+      doctor_name:
+        description: Denormalized free-text doctor name captured at transfer time; no FK to doctors.
+        sensitive: true
+      matched_coordinator:
+        description: True when the receiving agent was the mapped department coordinator for that doctor (routing hit-rate metric).
+        values: [true, false]
+    join_hints:
+      - "doctor_name is a denormalized text copy of the doctor's name; relate to doctors only fuzzily (no FK)"
+
+  status_transitions:
+    description: >
+      State-machine configuration defining which status-to-status moves are allowed within a
+      workflow (from_status_id to to_status_id, with JSONB conditions, required_fields and
+      auto_actions). Currently EMPTY (0 rows) in this pilot database — transitions are evidently not
+      enforced through this table yet, so it holds no analytics value today; actual status-change
+      history lives elsewhere (e.g. call_history / visits_actions updates).
+    columns:
+      transition_name:
+        description: Display label for the transition; empty table.
+      is_allowed:
+        description: Whether the transition is permitted; empty table.
+      conditions:
+        description: JSONB guard conditions for the transition; empty table.
+      required_fields:
+        description: JSONB list of fields that must be filled before transitioning; empty table.
+      auto_actions:
+        description: JSONB side-effects executed automatically on transition; empty table.
+
+  # ── users-org-mappings (12 tables) ──────────────────────
+  users:
+    description: >
+      Master table of hospital staff accounts (~85 rows): calling agents, NI callers,
+      coordinators, counsellors, handlers, unit admins and admins who operate the Kalaam
+      patient-workflow platform. One row per staff member, keyed by a varchar(128) id
+      (Firebase-style UID, not a uuid). Almost every operational table points back here —
+      tasks (visits_actions.acted_by_id), escalations (assigned_to/created_by), calls
+      (call_history.created_by_id), patients (patients.agent_id), prescriptions, WhatsApp
+      messaging, notifications. Each user belongs to a center (center_id), optionally a
+      department, and has a role via role_id -> roles.
+    columns:
+      id:
+        description: varchar(128) external auth UID (not uuid); the canonical staff/agent identifier used across the whole schema.
+      email:
+        sensitive: true
+      first_name:
+        sensitive: true
+      last_name:
+        sensitive: true
+      phone:
+        sensitive: true
+      hashed_password:
+        sensitive: true
+      fcm_token:
+        description: Firebase Cloud Messaging push-notification token for the user's device.
+        sensitive: true
+      is_shadow:
+        description: True for "shadow" accounts that a real user can impersonate/operate as (see user_sessions shadow_user_id/actual_user_id).
+        values: [true, false]
+      allowed_shadow_users:
+        description: JSONB list of shadow user ids this user is permitted to log in as.
+      user_config:
+        description: JSONB per-user configuration blob (UI/behavior settings).
+      data:
+        description: JSONB free-form extra attributes; contents not inspected.
+      last_task_assignment_at:
+        description: Timestamp of the most recent auto task assignment to this user; used by round-robin/least-recently-assigned task routing.
+      login_count:
+        description: Cumulative number of logins.
+
+  user_sessions:
+    description: >
+      Login/impersonation sessions (~102 rows). Each row records a session where an actual
+      staff member (actual_user_id) operated as a possibly different "shadow" identity
+      (shadow_user_id) — for normal logins the two can be the same user. Tracks
+      started_at/ended_at and whether the session is still active. Useful for auditing who
+      actually performed work under a shared or shadow account.
+    columns:
+      shadow_user_id:
+        description: The user identity the session runs as (the impersonated account).
+      actual_user_id:
+        description: The real logged-in person behind the session.
+      session_token:
+        sensitive: true
+      is_active:
+        description: True while the session is open (ended_at null).
+
+  roles:
+    description: >
+      Role catalog (~8 rows) defining staff role types and their permissions. Each user has
+      at most one role via users.role_id. role_type distinguishes the operational persona;
+      permissions and config are JSONB blobs controlling what the role can do in the app.
+    columns:
+      name:
+        description: Internal role slug.
+      display_name:
+        description: Human-readable role label shown in the UI.
+      role_type:
+        description: Operational persona of the role; drives task routing and UI. Observed values sampled live.
+        values: [admin, unit_admin, calling_agent, ni_caller, handler, uploader_default, uploader_peripheral, custom]
+      permissions:
+        description: JSONB permission set for the role.
+      config:
+        description: JSONB role-level behavior configuration.
+
+  agent_presence:
+    description: >
+      Real-time availability tracker for calling agents (~55 rows, one per user). Records
+      whether the agent is currently logged in (heartbeat-based), whether automatic task
+      assignment to them is enabled, and a per-day counter of externally assigned tasks
+      (external_assigned_today, reset via external_counter_date). Used by the task
+      assignment engine to decide which agents can receive new patient tasks.
+    columns:
+      is_logged_in:
+        description: Current login state maintained by login/logout/heartbeat events.
+      assignment_enabled:
+        description: Whether the auto-assignment engine may route new tasks to this agent (an admin toggle, independent of login state).
+      last_heartbeat_at:
+        description: Last liveness ping from the agent's client; staleness implies the agent dropped off.
+      external_assigned_today:
+        description: Count of externally-sourced tasks assigned to the agent for the current counter date; supports daily caps/balancing.
+      external_counter_date:
+        description: The date external_assigned_today applies to; counter resets when the date rolls over.
+
+  centers:
+    description: >
+      Hospital centers/units (~2 rows) under a hospital (hospital_id -> hospitals). A center
+      is the main tenancy scope of the system: users, patients, prescriptions, escalations,
+      escalation rules, analytics and all coordinator/caller mappings are scoped by
+      center_id. Holds operating hours, specialties and settings as JSONB.
+    columns:
+      name:
+        description: Center name (e.g. a hospital unit); organizational, not patient data.
+      email:
+        sensitive: true
+      phone:
+        sensitive: true
+      operating_hours:
+        description: JSONB schedule of the center's working hours.
+      specialties:
+        description: JSONB list of medical specialties offered at the center.
+      settings:
+        description: JSONB center-level configuration blob.
+
+  departments:
+    description: >
+      Lookup of hospital departments (~1 row in this pilot DB). Referenced by users.department_id
+      and doctors.department_id. Largely unused in the pilot — department names elsewhere
+      (department_coordinator_mappings.department_name, floor_counsellor_mappings.department,
+      ni_caller_department_mappings.department_pattern) are stored as free strings, not FKs
+      to this table.
+
+  hospitals:
+    description: >
+      Top-level hospital organizations (~1 row: the pilot hospital). Parent of centers;
+      also referenced by hospital-scoped escalation matrices, WhatsApp settings and system
+      config. saheli_tenant_id links this hospital to its tenant in the separate Saheli
+      system.
+    columns:
+      name:
+        description: Hospital name; organizational, not patient data.
+      email:
+        sensitive: true
+      phone:
+        sensitive: true
+      address:
+        description: JSONB structured address of the hospital.
+        sensitive: true
+      settings:
+        description: JSONB hospital-level configuration blob.
+      saheli_tenant_id:
+        description: UUID of the corresponding tenant in the external Saheli platform (no FK; cross-system link).
+
+  department_coordinator_mappings:
+    description: >
+      Routing table (~59 rows) mapping a department name (free-text string, per center) to
+      the staff coordinator (coordinator_user_id -> users) responsible for that department's
+      patients/tasks. Used to decide which coordinator gets work generated for a given
+      department. Rows can be deactivated via is_active instead of deleted.
+    columns:
+      department_name:
+        description: Free-text department label matched against visit/prescription department strings; NOT an FK to departments.
+
+  doctor_coordinator_mappings:
+    description: >
+      Routing table (~52 rows) mapping a doctor's name (free-text string) to the coordinator
+      user responsible for that doctor's patients. Complement of
+      department_coordinator_mappings for doctor-level routing; is_active soft-disables a
+      mapping.
+    columns:
+      doctor_name:
+        description: Free-text doctor name matched against visit data; NOT an FK to the doctors table.
+        sensitive: true
+      center_id:
+        description: Center scope of the mapping (uuid; no FK constraint declared in schema, but holds centers.id).
+
+  ni_caller_department_mappings:
+    description: >
+      Routing table (~14 rows) assigning NI callers ("not interested" / non-interventional
+      calling agents) to departments by pattern. department_pattern is matched against a
+      visit's department string to pick the caller (user_id -> users); rows with
+      is_fallback=true act as the catch-all assignee when no pattern matches. Scoped by
+      center_id.
+    columns:
+      department_pattern:
+        description: Free-text department match pattern (e.g. substring/like pattern) used to route work to the mapped NI caller.
+      is_fallback:
+        description: True marks the default/catch-all caller used when no department pattern matches.
+        values: [true, false]
+
+  floor_counsellor_mappings:
+    description: >
+      Routing table (~12 rows) mapping a hospital OPD department + physical floor to the
+      floor counsellor (counsellor_user_id -> users) stationed there. Includes the OPD code
+      and floor label; used to route in-person counselling tasks to the right counsellor.
+      Scoped by center_id, soft-disabled via is_active.
+    columns:
+      department:
+        description: Free-text OPD department name (varchar 500); NOT an FK to departments.
+      opd_code:
+        description: Short OPD department code used by the hospital's HIS.
+      floor:
+        description: Physical floor where the counsellor sits.
+        values: [2nd Floor, 3rd Floor, 4th Floor, 7th Floor, 8th Floor]
+
+  doc_map_assignment_audit:
+    description: >
+      Append-only audit log (~21,300 rows, May 2026 to present) of patient-to-agent
+      assignment changes made by the doctor-mapping/assignment engine. Each row records the
+      patient, the previous agent (old_agent), the newly assigned agent (new_agent), and
+      case_used — the specific assignment rule/branch that fired. High-volume; useful for
+      analyzing how patients get distributed across calling agents.
+    columns:
+      patient_id:
+        description: patients.id (no FK constraint declared).
+      new_agent:
+        description: users.id of the agent the patient was assigned to (no FK constraint).
+      old_agent:
+        description: users.id of the previously assigned agent, null on first assignment (no FK constraint).
+      case_used:
+        description: Which assignment rule/case produced the change; values encode rule branches, some naming specific agents.
+        values: [procedure, ip_admission, latest_visit, reassign_followup_pair, reassign_shiva_hari, followup_other_srihari, followup_specialty_shivan, accident_emergency_srihari, accident_emergency_shivan, gynae_split_srihari, gynae_split_shivan]
+      changed_at:
+        description: When the reassignment happened (range observed 2026-05-05 to 2026-07-18).
+
+  # ── system-analytics (10 tables) ────────────────────────
+  notifications:
+    description: >
+      In-app/user notifications delivered to hospital staff. One row is a single
+      notification addressed to a staff user (users.id), optionally tied to a patient
+      visit and a visit action. Currently used almost exclusively for the disposition
+      escalation lifecycle — staff are notified when an escalation is created, nudged,
+      breached (SLA missed), transferred, or resolved. Active table (~1,225 rows,
+      Apr–Jul 2026); supports read/unread tracking and scheduled delivery.
+    columns:
+      type:
+        description: Notification event type; all observed values belong to the disposition-escalation lifecycle.
+        values: [disposition_escalation.created, disposition_escalation.nudge, disposition_escalation.breached, disposition_escalation.transferred, disposition_escalation.resolved]
+      priority:
+        description: Urgency of the notification (default 'medium').
+        values: [medium, high, urgent]
+      channels:
+        description: JSONB array of delivery channels; defaults to ["in_app"]. Not sampled (jsonb).
+      delivery_status:
+        description: JSONB map of per-channel delivery outcomes.
+      is_read:
+        description: Whether the recipient has read the notification; read_at holds the timestamp.
+      scheduled_for:
+        description: When the notification should be delivered (defaults to now, i.e. immediate).
+      message:
+        description: Free-text notification body; may contain patient context.
+        sensitive: true
+      title:
+        description: Short notification headline; may contain patient names.
+        sensitive: true
+      data:
+        description: JSONB context payload for the notification (e.g. escalation details).
+        sensitive: true
+
+  bulk_import_batches:
+    description: >
+      Tracks bulk uploads of patient visits into the system (e.g. spreadsheet imports of
+      the day's OPD or IPD visit list). One row is one import batch: how many visits it
+      contained, how many were processed, failed, or skipped, and its overall status.
+      Active table (~117 batches, Mar–Jul 2026). Created by a staff user for a specific
+      hospital center; workflow_code says which patient workflow the imported visits enter.
+    columns:
+      status:
+        description: Batch processing outcome; 'partial' means some rows failed or were skipped.
+        values: [pending, processing, completed, partial, failed]
+      workflow_code:
+        description: Target patient workflow for the imported visits (outpatient vs inpatient); default 'opd'.
+        values: [opd, ipd]
+      errors:
+        description: JSONB list of per-row import errors; may include patient identifiers from the source file.
+        sensitive: true
+      skipped:
+        description: JSONB list of rows skipped during import (e.g. duplicates); may include patient identifiers.
+        sensitive: true
+      import_metadata:
+        description: JSONB metadata about the source file/upload.
+        sensitive: true
+      total_visits:
+        description: Number of visit rows in the uploaded file; compare with processed_count, failed_count, skipped_count.
+
+  system_config:
+    description: >
+      Key-value application configuration store, scoped optionally to a hospital and/or a
+      workflow. One row is one named config entry (config_key) with a JSONB value —
+      e.g. upload form field definitions, verification field lists, WhatsApp integration
+      settings, filter configuration, and stuck-prescription recovery thresholds. Small
+      reference table (~6 rows); version history lives in system_config_versions.
+    columns:
+      config_key:
+        description: Unique name of the configuration entry.
+        values: [UPLOAD_FORM_FIELDS, VERIFICATION_FIELDS, FILTER_CONFIG, whatsapp_integration, not_interested_reactivation, STUCK_PRESCRIPTION_RECOVERY_THRESHOLDS]
+      config_type:
+        description: Broad category of the config entry.
+        values: [general, feature, integration]
+      environment:
+        description: Deployment environment the entry applies to; observed only 'all'.
+        values: [all]
+      config_value:
+        description: JSONB payload holding the actual configuration; may embed integration credentials when is_encrypted is true.
+        sensitive: true
+      is_encrypted:
+        description: Marks entries whose config_value contains secrets/credentials.
+      version:
+        description: Current version number; each change should append a row to system_config_versions.
+
+  system_config_versions:
+    description: >
+      Version history (audit trail) for system_config entries. One row is a full snapshot
+      of a config entry at a given version, plus who changed it (changed_by → users.id)
+      and why (change_reason). Currently empty (0 rows) — no config changes have been
+      versioned yet in this environment.
+    columns:
+      config_id:
+        description: The system_config row this version belongs to.
+      config_value:
+        description: JSONB snapshot of the config at this version; may contain secrets when is_encrypted is true.
+        sensitive: true
+      changed_by:
+        description: users.id of the staff member who made the change.
+      change_reason:
+        description: Free-text reason for the change.
+
+  feature_flags:
+    description: >
+      Feature toggle registry controlling rollout of application features. One row is one
+      flag with enable/disable state, global vs targeted scope (target_users/target_roles),
+      percentage rollout, and environment. Tiny reference table (~2 rows); both observed
+      flags are enabled globally.
+    columns:
+      flag_key:
+        description: Machine key of the flag.
+        values: [task_transfer_indirect, upload_auto_assign_uploader]
+      environment:
+        description: Environment the flag applies to; observed only 'all'.
+        values: [all]
+      is_enabled:
+        description: Master on/off switch for the flag.
+      is_global:
+        description: True when the flag applies to everyone regardless of target_users/target_roles.
+      target_users:
+        description: JSONB list of specific user ids the flag targets (when not global).
+        sensitive: true
+      target_roles:
+        description: JSONB list of roles the flag targets.
+      rollout_percentage:
+        description: Percentage-based gradual rollout (0-100).
+      config:
+        description: JSONB of flag-specific parameters.
+
+  audit_logs:
+    description: >
+      Generic audit trail intended to record who did what to which entity, with before/after
+      values (old_values/new_values/changes), request metadata (IP, user agent, request id)
+      and an outcome status. Currently EMPTY (0 rows) — the audit-log feature does not
+      appear to be populated in this environment; do not expect answers from it. Real
+      operational change history is instead scattered in domain tables (e.g. scheduler_logs,
+      system_config_versions).
+    columns:
+      action:
+        description: Verb describing what was done (e.g. create/update/delete). No values observed (empty table).
+      entity_type:
+        description: Type of the affected record; pairs with entity_id (polymorphic reference, no FK).
+      status:
+        description: Outcome of the audited operation (e.g. success/failure). No values observed.
+      user_email:
+        description: Email of the acting staff user, denormalized.
+        sensitive: true
+      ip_address:
+        description: Client IP of the request.
+        sensitive: true
+      user_agent:
+        description: Client browser/user-agent string.
+        sensitive: true
+      old_values:
+        description: JSONB snapshot before the change; may contain patient data.
+        sensitive: true
+      new_values:
+        description: JSONB snapshot after the change; may contain patient data.
+        sensitive: true
+      changes:
+        description: JSONB diff of changed fields.
+        sensitive: true
+      data:
+        description: JSONB extra context payload.
+        sensitive: true
+    join_hints:
+      - "entity_id + entity_type form a polymorphic reference to any table (patients, patient_visits, etc.) with no FK constraint"
+
+  scheduler_logs:
+    description: >
+      Log of automated scheduler/background-job operations on patient work items —
+      agent (staff) reassignments, workflow changes, task-type changes, reminder actions —
+      including before/after values, trigger info, errors, timing (execution_time_ms) and
+      records_affected. Currently EMPTY (0 rows) in this environment, so no observed
+      values; structure indicates it is the audit trail for the auto-assignment/scheduling
+      engine.
+    columns:
+      log_type:
+        description: Category of scheduler log entry (no values observed; empty table).
+      operation:
+        description: Name of the scheduler operation performed.
+      trigger_type:
+        description: What triggered the operation (no values observed).
+      reminder_action:
+        description: Action taken on a reminder (no values observed).
+      previous_agent_id:
+        description: Staff user id the item was assigned to before reassignment.
+      new_agent_id:
+        description: Staff user id the item was reassigned to.
+      error_stack:
+        description: Stack trace when the operation failed.
+      additional_data:
+        description: JSONB extra context.
+        sensitive: true
+      error_context:
+        description: JSONB context captured on failure; may include record data.
+        sensitive: true
+    join_hints:
+      - "patient_id holds patients.id, visit_id holds patient_visits.id, task_id holds tasks-table id, batch_id likely bulk_import_batches.id, created_by_id/previous_agent_id/new_agent_id hold users.id, previous_workflow_id/new_workflow_id hold workflows.id, previous_task_type_id/new_task_type_id hold task_types ids — none have FK constraints"
+
+  analytics_daily_summary:
+    description: >
+      Pre-aggregated daily metrics rollup per center, per user, per metric_type and date —
+      counts (total/completed/pending/failed), completion-time stats, quality score and
+      success rate, plus a JSONB metrics blob. Currently EMPTY (0 rows): the aggregation
+      pipeline is not populating it in this environment, so analytics questions must be
+      answered from the underlying operational tables instead.
+    columns:
+      metric_type:
+        description: Which metric family the row summarizes (no values observed; empty table).
+      metrics:
+        description: JSONB of additional metric values beyond the fixed columns.
+      average_completion_time:
+        description: Average time to completion (integer; unit not documented, likely seconds or minutes).
+
+  analytics_events:
+    description: >
+      Raw product/usage event stream — one row per event (event_type) performed by a user
+      on an entity (entity_type/entity_id), with session, IP, user-agent and a JSONB
+      event_data payload, partition-keyed by date_partition. Currently EMPTY (0 rows):
+      event tracking is not active in this environment.
+    columns:
+      event_type:
+        description: Name of the tracked event (no values observed; empty table).
+      entity_type:
+        description: Type of the entity the event concerns; pairs with entity_id (polymorphic, no FK).
+      date_partition:
+        description: Date key used for partitioning/rollups; derived from occurred_at.
+      session_id:
+        description: Client session identifier.
+        sensitive: true
+      ip_address:
+        description: Client IP address.
+        sensitive: true
+      user_agent:
+        description: Client browser/user-agent string.
+        sensitive: true
+      event_data:
+        description: JSONB event payload; may contain patient context.
+        sensitive: true
+    join_hints:
+      - "entity_id + entity_type form a polymorphic reference to any table with no FK constraint"
+
+  alembic_version:
+    description: >
+      Internal Alembic (SQLAlchemy migrations) bookkeeping table holding the single current
+      schema-migration revision id. One row, one column. Not a business table — never
+      relevant to analytics questions.
+    columns:
+      version_num:
+        description: Current migration revision hash (observed '8ededad0f87b').
+
+glossary:
+  - term: UHID
+    definition: Unique Health ID — the hospital's patient identifier; the business key used across systems
+      and in file uploads (patients.uhid, suppression list, nursing log).
+    maps_to: patients
+  - term: suppression list / DNC / do-not-contact
+    definition: Patients excluded from outbound calls or messages (already converted, lost, or opted out),
+      matched by UHID or phone with is_active=true.
+    maps_to: patient_suppression_list
+  - term: visit / encounter
+    definition: A single hospital visit by a patient — the row that ties patient, doctor, department, date,
+      and prescription together.
+    maps_to: patient_visits
+  - term: task / action / follow-up task
+    definition: An actionable follow-up item (lab test, procedure, IP admission, follow-up consult, etc.)
+      generated per visit, mostly AI-extracted from prescriptions, with urgency and revenue potential.
+    maps_to: visits_actions
+  - term: IP conversion / IP admission potential
+    definition: Likelihood (high/medium/low) that an outpatient converts to an inpatient admission; a key
+      revenue metric stored on both patient and visit.
+    maps_to: patients
+  - term: workflow status / disposition
+    definition: Where the patient sits in the outreach funnel after agent contact — e.g. new, follow_up,
+      booking, visited, not_interested, cost_help, insurance_loan_pending.
+    maps_to: patients
+  - term: NI / not interested
+    definition: workflow_status value 'not_interested'; patients.previously_not_interested flags repeat
+      NI patients.
+    maps_to: patients
+  - term: obsterics / gynae
+    definition: Obstetrics/gynecology specialty; If a patient is in obsterics, they are pregnant. 
+    maps_to: patients, prescriptions
+  - term: agent worked
+    definition: 'Whether the assigned calling agent has actioned a patient or task (agent_worked_status:
+      assigned/worked).'
+    maps_to: visits_actions
+  - term: payor type
+    definition: 'How the patient pays: CGHS/ECHS/ESI government schemes, private INSURANCE, or OTHERS (self-pay).'
+    maps_to: patients
+  - term: IPD / OPD
+    definition: 'Inpatient vs outpatient workflow track (workflow_type: ipd, opd, gynae_workflow).'
+    maps_to: patients
+  - term: care plan / schedule / session
+    definition: 'A recurring multi-session care course (e.g. physiotherapy): plan header in patient_schedules,
+      dated sessions in schedule_occurrences, reschedules in schedule_adjustments. Feature currently unused
+      (0 rows).'
+    maps_to: patient_schedules
+  - term: ANC / antenatal visit
+    definition: Antenatal-care nursing register with ANC number, LMP, and EDD per pregnancy case (currently
+      empty).
+    maps_to: nursing_visit_log
+  - term: LMP / EDD
+    definition: Last menstrual period date and expected date of delivery — pregnancy dating fields in the
+      ANC register.
+    maps_to: nursing_visit_log
+  - term: revenue potential
+    definition: Estimated revenue value attached to each follow-up task, used to rank opportunities.
+    maps_to: visits_actions
+  - term: fitness case
+    definition: A fitness-for-surgery clearance task (visits_actions.is_fitness_case).
+    maps_to: visits_actions
+  - term: prescription
+    definition: The clinical document uploaded for a patient (photo/PDF of a doctor's prescription, or Excel
+      import) that is OCR/AI-extracted and drives follow-up workflows.
+    maps_to: prescriptions
+  - term: IP admission advised / IP recommendation
+    definition: Flag that the doctor advised inpatient (IP) admission on the prescription — the main trigger
+      for outbound follow-up and conversion tracking.
+    maps_to: prescriptions
+  - term: handwritten vs digital prescription
+    definition: 'prescription_type: whether the source document was a handwritten script or a digitally
+      generated one.'
+    maps_to: prescriptions
+  - term: unreadable prescription
+    definition: A prescription escalated because the document could not be read (escalation_status = 'Unreadable').
+    maps_to: prescriptions
+  - term: extraction / OCR confidence
+    definition: Automated data extraction from prescription images; extraction_method, confidence_score,
+      quality_score measure it.
+    maps_to: prescriptions, prescription_files
+  - term: prescription file / upload
+    definition: The stored image/PDF of a prescription in cloud storage (GCS) with its processing pipeline
+      state.
+    maps_to: prescription_files
+  - term: verified prescription
+    definition: A prescription whose extracted data was checked by staff (is_verified, verified_by, verified_at).
+    maps_to: prescriptions
+  - term: no-show
+    definition: Patient did not attend a scheduled appointment; recorded via no_show_at and marked_by_id.
+    maps_to: appointments
+  - term: reschedule / reschedule chain
+    definition: An appointment moved to a new date; the new row points to the old one via rescheduled_from_id,
+      count in reschedule_count.
+    maps_to: appointments
+  - term: conversion
+    definition: An IP-advised patient actually booking/completing an admission appointment — analyzed by
+      joining prescriptions (ip_admission_advised) to appointments via patient.
+    maps_to: appointments, prescriptions
+  - term: follow-up reminder / call-back reminder
+    definition: A staff to-do to re-contact a patient on a given date (pending / completed / dismissed).
+    maps_to: reminders
+  - term: disposition
+    definition: The outcome a staff caller records after a call attempt (connected, not_connected, follow_up,
+      not_interested, resolved, transferred, etc.), stored in call_history.call_status.
+    maps_to: call_history
+  - term: call log / call attempt
+    definition: A staff-entered record of trying to reach a patient, with reason, sub-reason, remarks and
+      follow-up date.
+    maps_to: call_history
+  - term: follow-up
+    definition: A planned next call, indicated by call_history.call_status='follow_up' and call_history.follow_up_date.
+    maps_to: call_history
+  - term: CDR / call detail record
+    definition: 'The telephony provider''s record of an actual phone call: direction, answered/missed, duration,
+      numbers, charges.'
+    maps_to: patient_call_records
+  - term: Acefone
+    definition: The cloud telephony provider whose calls are ingested; patient_call_records.provider='acefone'.
+    maps_to: patient_call_records
+  - term: click-to-call
+    definition: An outbound call an agent triggers from the app UI; appears as direction/call_hint 'clicktocall'
+      and service 'ClickToCall'.
+    maps_to: patient_call_records
+  - term: answered vs missed
+    definition: Provider-reported connection outcome of a phone call (patient_call_records.status); use
+      answered_seconds for talk time.
+    maps_to: patient_call_records
+  - term: hangup cause
+    definition: Telephony reason the call ended (Normal Clearing, User busy, No answer, Number In DND, ...);
+      raw and inconsistently cased.
+    maps_to: patient_call_records
+  - term: linked / unresolved call
+    definition: Whether a telephony CDR was matched to a patient record (link_status); phone_fallback means
+      matched by phone number.
+    maps_to: patient_call_records
+  - term: DID number
+    definition: The hospital's dial-in phone line used on a call (patient_call_records.did_number).
+    maps_to: patient_call_records
+  - term: call recording
+    definition: Audio file of a phone call, stored in GCS and tracked as asset_type='recording'.
+    maps_to: patient_call_record_assets
+  - term: call summary / transcript
+    definition: AI-generated summary and transcript of a call; text lives on patient_call_records (summary_text,
+      transcript_text), the summary file artifact in patient_call_record_assets (asset_type='summary').
+    maps_to: patient_call_records
+  - term: talk time
+    definition: Seconds the call was actually connected (answered_seconds), as opposed to total call_duration.
+    maps_to: patient_call_records
+  - term: journey stage
+    definition: AI-derived stage of the patient in the maternity/commercial funnel from a call.
+    maps_to: call_derived_analytics
+  - term: churn risk
+    definition: AI-derived risk that the patient drops out of the funnel after a call.
+    maps_to: call_derived_analytics
+  - term: package interest
+    definition: Which hospital package (e.g. delivery/maternity package) the patient showed interest in
+      on a call.
+    maps_to: call_derived_analytics
+  - term: next best action
+    definition: AI-recommended follow-up (next_action_type/date/window, priority_score) from a call.
+    maps_to: call_derived_analytics
+  - term: escalation
+    definition: A ticket raised (usually automatically) when a patient case with an unresolved call disposition
+      — e.g. cost help or pending insurance approval — is not acted on within the configured time; notified
+      to staff by email.
+    maps_to: escalations
+  - term: disposition / call reason
+    definition: The outcome category recorded on a patient call (cost_help, not_interested, second_opinion,
+      etc.) that determines which escalation rule fires; stored on the escalation as call_reason/call_sub_reason.
+    maps_to: escalations
+  - term: TAT (turnaround time)
+    definition: Time from escalation creation to resolution; stored in seconds (turnaround_time_seconds)
+      and as a display string (turnaround_time_human).
+    maps_to: escalations
+  - term: escalation level (L1/L2)
+    definition: Tier in the escalation matrix indicating how far up the notification chain a case has been
+      bumped; only L1 observed so far.
+    maps_to: escalations
+  - term: escalation matrix
+    definition: Per-level routing definition of who gets notified at L1, L2, etc. Lives inline as jsonb
+      on each rule (escalation_rules.escalation_matrix); the dedicated escalation_matrices table is empty/unused.
+    maps_to: escalation_rules
+  - term: SLA breach / overdue
+    definition: An escalation past its due_date without resolution; sla_hours on the rule sets the allowance
+      and is_overdue flags the breach.
+    maps_to: escalations
+  - term: daily team digest
+    definition: A consolidated end-of-day escalation email summarizing outstanding tasks for a team, raised
+      by digest rules (escalation_type = daily_team_digest) rather than per-patient.
+    maps_to: escalations
+  - term: auto-resolution
+    definition: Automatic closing of an escalation, either when the underlying entity changes status (auto_resolve_on_status_change
+      on the rule) or when NLP on an inbound email reply indicates the issue is handled (nlp_analysis /
+      nlp_confidence).
+    maps_to: escalation_email_replies
+  - term: escalation rule
+    definition: The configuration (conditions, timing, routing, SLA) that decides when an escalation fires
+      and who is notified; identified by rule_code like COST_HELP_URGENT1.
+    maps_to: escalation_rules
+  - term: coordinator
+    definition: Hospital staff member coordinating the patient case, named on the escalation (coordinator_name).
+    maps_to: escalations
+  - term: disposition escalation
+    definition: A ticket raised when a calling agent's recorded call outcome (disposition) needs handoff
+      to a specialist handler — e.g. a financial concern or pending insurance loan — tracked against a TAT
+      deadline until resolved.
+    maps_to: disposition_escalations
+  - term: TAT / TAT breach
+    definition: Turnaround time — the SLA (in minutes, per center and escalation type) within which a handler
+      must resolve an escalation; missing it marks the ticket 'breached' and can notify leadership.
+    maps_to: disposition_escalation_configs
+  - term: handler
+    definition: The staff user configured to receive and resolve escalations of a given type at a center
+      (assigned_to on the ticket, handler_user_id in config).
+    maps_to: disposition_escalation_configs
+  - term: nudge
+    definition: A reminder message (push notification) sent by an agent or CXO to the assigned handler chasing
+      progress on an open escalation.
+    maps_to: disposition_escalation_nudges
+  - term: CXO escalation
+    definition: Further escalation of a breached/stalled ticket to hospital leadership (CXO), flagged on
+      the ticket via cxo_escalated / cxo_escalated_at.
+    maps_to: disposition_escalations
+  - term: escalation timeline / audit trail
+    definition: The per-ticket history of lifecycle events (created, assigned, nudge_sent, breached, resolved,
+      etc.) with actor and role.
+    maps_to: disposition_escalation_events
+  - term: financial concern
+    definition: An escalation type where the patient raised affordability/payment worries during a call.
+    maps_to: disposition_escalations
+  - term: insurance loan pending
+    definition: An escalation type for cases blocked on insurance approval or medical-loan processing.
+    maps_to: disposition_escalations
+  - term: not connected
+    definition: A contact attempt that failed to reach the patient; timestamped on the ticket (not_connected_at)
+      and logged as a timeline event, driving retry/follow-up flow.
+    maps_to: disposition_escalations
+  - term: escalation (WhatsApp)
+    definition: A patient WhatsApp conversation flagged (usually by the Saheli chatbot) as needing human
+      staff attention; tracked as a case with priority, severity, assignment, SLA, and resolution.
+    maps_to: whatsapp_escalations
+  - term: escalation ref
+    definition: Short human-readable case reference number staff use to identify a WhatsApp escalation (escalation_ref).
+    maps_to: whatsapp_escalations
+  - term: Saheli
+    definition: The external WhatsApp chatbot/messaging backend; all whatsapp_* tables in Kalaam are synced
+      mirrors of Saheli data (saheli_message_id, saheli_escalation_id, saheli_media_id, synced_from_saheli_at).
+    maps_to: whatsapp_messages
+  - term: inbound / outbound
+    definition: 'Message direction: inbound = sent by the patient, outbound = sent by hospital staff or
+      a template. Stored in whatsapp_messages.direction.'
+    maps_to: whatsapp_messages
+  - term: WAMID
+    definition: WhatsApp (Meta) platform message id, used to correlate messages with delivery webhooks and
+      deduplicate.
+    maps_to: whatsapp_messages
+  - term: template message
+    definition: A pre-approved WhatsApp Business template sent outbound; identified by template_id with
+      template_variables holding the substitutions.
+    maps_to: whatsapp_messages
+  - term: internal note
+    definition: A staff-only annotation on a WhatsApp conversation that is never delivered to the patient
+      (whatsapp_messages.is_internal_note = true).
+    maps_to: whatsapp_messages
+  - term: unread count
+    definition: Number of inbound patient messages staff have not yet read; per-case on whatsapp_escalations.unread_count
+      and per-patient on patient_whatsapp_state.total_unread_messages.
+    maps_to: patient_whatsapp_state
+  - term: SLA due / SLA breach
+    definition: Deadline for handling an escalation (sla_due_at); a breach is when resolved_at is after
+      sla_due_at or the case is still open past it.
+    maps_to: whatsapp_escalations
+  - term: emergency flag
+    definition: Marks a WhatsApp escalation as a medical emergency (whatsapp_escalations.emergency, rolled
+      up to patient_whatsapp_state.has_emergency).
+    maps_to: whatsapp_escalations
+  - term: trigger source
+    definition: What raised an escalation — default 'chatbot'; other sources would indicate manual or system
+      triggers (whatsapp_escalations.trigger_source).
+    maps_to: whatsapp_escalations
+  - term: case timeline / audit trail
+    definition: The event-by-event history of an escalation (status changes, assignments, notes) with actor
+      and before/after status.
+    maps_to: whatsapp_escalation_events
+  - term: voice-note transcription
+    definition: Automatic speech-to-text of WhatsApp audio attachments, stored with its language code.
+    maps_to: whatsapp_media
+  - term: messaging permission
+    definition: Grant allowing a specific staff user to send WhatsApp messages to patients; active while
+      revoked_at is NULL.
+    maps_to: whatsapp_messaging_permissions
+  - term: WhatsApp integration health
+    definition: Per-hospital connection settings and last health-check result for the Saheli backend.
+    maps_to: whatsapp_settings
+  - term: tenant
+    definition: Saheli-side scope identifier (tenant_id uuid / tenant_slug) partitioning WhatsApp data per
+      hospital deployment; no local FK.
+    maps_to: whatsapp_settings
+  - term: needs manual review
+    definition: Flag set when the chatbot's escalation classification has low confidence_score and a human
+      should re-triage.
+    maps_to: whatsapp_escalations
+  - term: workflow
+    definition: A configured care/ops pipeline such as OPD conversion, IPD, cancer, gynae, or prescription
+      upload; the top-level dimension for most operational reporting.
+    maps_to: workflows
+  - term: bucket
+    definition: A board column/tab grouping related statuses (FRESH, FOLLOW_UP, NOT_CONNECTED, ADMITTED,
+      ESCALATION); staff work queues are organized by bucket.
+    maps_to: workflow_buckets
+  - term: not connected / couldn't reach
+    definition: Bucket and statuses for patients whose phone contact failed (busy, switch off, invalid/wrong
+      number, no number).
+    maps_to: workflow_statuses
+  - term: fresh leads
+    definition: Newly entered patients/tasks not yet worked, sitting in the FRESH bucket with status 'new'.
+    maps_to: workflow_buckets
+  - term: terminal status / closed
+    definition: A status that ends the funnel for a patient or task (admitted, closed_inquiry, not_interested);
+      flagged by is_terminal.
+    maps_to: workflow_statuses
+  - term: task type
+    definition: The clinical category of a scheduled action for a patient — follow-up, medication, lab test,
+      procedure, chemotherapy, IP admission, etc.
+    maps_to: task_types
+  - term: task transfer / reassignment
+    definition: Moving a patient task from one agent to another; each move is logged with who transferred
+      it and whether it went to the right coordinator.
+    maps_to: task_transfer_logs
+  - term: coordinator match rate
+    definition: Share of task transfers where the receiving agent was the mapped department coordinator
+      for the doctor (matched_coordinator flag).
+    maps_to: task_transfer_logs
+  - term: OPD to IPD conversion funnel
+    definition: 'The pipeline moving outpatient leads toward admission: new → visited/on_medications → admission_booked
+      → admitted, with cost/insurance-pending stages in between.'
+    maps_to: workflow_statuses
+  - term: insurance/loan pending
+    definition: Funnel stages where admission is blocked on financing approval (insurance_approval_pending,
+      loan_approval_pending, insurance_loan_pending; COST_HELP bucket).
+    maps_to: workflow_statuses
+  - term: daily task snapshot
+    definition: Intended day-wise count of open tasks per workflow and bucket for trend reporting; table
+      exists but is empty in this pilot.
+    maps_to: task_snapshots
+  - term: status transition / state machine
+    definition: Configuration of which status moves are allowed and what they auto-trigger; schema present
+      but unpopulated in this pilot.
+    maps_to: status_transitions
+  - term: agent / calling agent
+    definition: Hospital staff member who makes outbound patient calls; a user with role_type calling_agent.
+      Their availability lives in agent_presence and their patient load changes are audited in doc_map_assignment_audit.
+    maps_to: users
+  - term: NI caller
+    definition: Specialized caller role (role_type ni_caller) handling a distinct calling stream; routed
+      to departments via ni_caller_department_mappings (pattern match with a fallback caller).
+    maps_to: ni_caller_department_mappings
+  - term: floor counsellor
+    definition: Counsellor stationed on a specific hospital floor for an OPD department; mapped in floor_counsellor_mappings
+      by department + OPD code + floor.
+    maps_to: floor_counsellor_mappings
+  - term: shadow user / impersonation
+    definition: A user account operated by another real person; users.is_shadow flags such accounts and
+      user_sessions records shadow_user_id vs actual_user_id per session.
+    maps_to: user_sessions
+  - term: presence / heartbeat
+    definition: Whether an agent is currently logged in and eligible for auto task assignment; tracked per
+      user in agent_presence (is_logged_in, last_heartbeat_at, assignment_enabled).
+    maps_to: agent_presence
+  - term: assignment / reassignment
+    definition: The engine's transfer of a patient from one agent to another; every change is logged in
+      doc_map_assignment_audit with the rule (case_used) that fired.
+    maps_to: doc_map_assignment_audit
+  - term: center / unit
+    definition: A hospital unit under a hospital; the main tenancy scope — users, patients, escalations
+      and all routing mappings carry center_id.
+    maps_to: centers
+  - term: role / permissions
+    definition: Staff persona (admin, unit_admin, calling_agent, ni_caller, handler, uploader_default, uploader_peripheral,
+      custom) with a JSONB permission set; users link via role_id.
+    maps_to: roles
+  - term: uploader
+    definition: Role types uploader_default / uploader_peripheral — staff who upload prescriptions/documents
+      into the system.
+    maps_to: roles
+  - term: external assignment cap
+    definition: Daily count of externally sourced tasks given to an agent, tracked as agent_presence.external_assigned_today
+      with external_counter_date.
+    maps_to: agent_presence
+  - term: breach / SLA breach
+    definition: An escalation that missed its response deadline; surfaces as a 'disposition_escalation.breached'
+      notification.
+    maps_to: notifications
+  - term: bulk upload / visit import
+    definition: Uploading a file of OPD/IPD patient visits in one batch; tracked with processed/failed/skipped
+      counts and a status (pending, processing, completed, partial, failed).
+    maps_to: bulk_import_batches
+  - term: OPD / IPD
+    definition: Outpatient department vs inpatient department; the workflow_code a bulk import targets.
+    maps_to: bulk_import_batches
+  - term: skipped rows
+    definition: Rows in a bulk import that were neither processed nor failed (e.g. duplicates); counted
+      in skipped_count.
+    maps_to: bulk_import_batches
+  - term: feature flag / toggle
+    definition: A switch controlling whether a feature is on, for whom (users/roles), and at what rollout
+      percentage.
+    maps_to: feature_flags
+  - term: config entry / system setting
+    definition: A named JSON configuration value (e.g. UPLOAD_FORM_FIELDS, whatsapp_integration) optionally
+      scoped to a hospital or workflow.
+    maps_to: system_config
+  - term: config version history
+    definition: Snapshot of a system config entry at each change, with who changed it and why.
+    maps_to: system_config_versions
+  - term: audit trail
+    definition: Record of who changed what entity with before/after values — table exists but is unpopulated
+      in this environment.
+    maps_to: audit_logs
+  - term: auto-assignment / agent reassignment
+    definition: Scheduler-driven transfer of a patient/task from one staff agent to another; logged with
+      previous/new agent and reason.
+    maps_to: scheduler_logs
+  - term: daily summary / metrics rollup
+    definition: Pre-aggregated per-day, per-center, per-user metric counts and rates — table exists but
+      is unpopulated.
+    maps_to: analytics_daily_summary
+  - term: event tracking / usage events
+    definition: Raw stream of user actions on entities with session and device info — table exists but is
+      unpopulated.
+    maps_to: analytics_events
+
+examples: []  

@@ -15,6 +15,7 @@ env/
 .env
 .env.*
 !.env.example
+!.env.local.example
 
 # Tooling / caches
 .pytest_cache/
@@ -23,9 +24,9 @@ env/
 .coverage
 htmlcov/
 
-# IDE / OS
+# IDE / OS / agent config (local, not shared)
+.claude/
 .idea/
 .vscode/
 .DS_Store
-frontend/
 commands.txt

@@ -1,7 +1,7 @@
-"""Thin async client for the Bolna voice AI API.
+"""Thin async client for the upstream voice engine (currently Bolna).
 
 Wraps a single shared ``httpx.AsyncClient`` configured with the base URL and
-Bearer auth. Bolna-specific endpoints are added as methods; a generic
+Bearer auth. Engine-specific endpoints are added as methods; a generic
 ``request`` helper backs them and can be reused for endpoints we haven't
 wrapped yet.
 
@@ -17,8 +17,8 @@ from typing import Any
 import httpx
 
 
-class BolnaError(Exception):
-    """Raised when Bolna returns a non-2xx response or is unreachable.
+class VoiceEngineError(Exception):
+    """Raised when the voice engine returns a non-2xx response or is unreachable.
 
     ``status_code`` is the upstream HTTP status (None on transport failure).
     ``payload`` is the parsed upstream error body when available.
@@ -31,8 +31,8 @@ class BolnaError(Exception):
         self.payload = payload
 
 
-class BolnaClient:
-    """Async wrapper around the Bolna REST API."""
+class VoiceEngineClient:
+    """Async wrapper around the upstream voice engine's REST API."""
 
     def __init__(self, api_key: str, base_url: str = "https://api.bolna.ai",
                  timeout: float = 30.0) -> None:
@@ -60,20 +60,20 @@ class BolnaClient:
         """Perform an authenticated request and return the parsed JSON body.
 
         Raises:
-            BolnaError: on transport failure or a non-2xx response.
+            VoiceEngineError: on transport failure or a non-2xx response.
         """
         try:
             response = await self._client.request(
                 method, path, json=json, params=params, data=data, files=files,
             )
         except httpx.RequestError as exc:  # DNS, connection, timeout, etc.
-            raise BolnaError(
-                f"Failed to reach Bolna at {self._base_url}{path}: {exc}"
+            raise VoiceEngineError(
+                f"Failed to reach voice engine at {self._base_url}{path}: {exc}"
             ) from exc
 
         if response.is_error:
-            raise BolnaError(
-                f"Bolna returned {response.status_code} for {method} {path}",
+            raise VoiceEngineError(
+                f"Voice engine returned {response.status_code} for {method} {path}",
                 status_code=response.status_code,
                 payload=_safe_json(response),
             )
@@ -110,16 +110,19 @@ class BolnaClient:
 
     async def create_batch(self, *, agent_id: str, csv_bytes: bytes,
                            file_name: str = "recipients.csv",
-                           from_phone_numbers: str | None = None,
+                           from_phone_numbers: list[str] | None = None,
                            retry_config: str | None = None,
                            webhook_url: str | None = None) -> Any:
         """POST /batches — create a batch by uploading a CSV (multipart).
 
-        ``from_phone_numbers`` and ``retry_config`` must already be
-        JSON-encoded strings (multipart form fields carry strings).
+        ``from_phone_numbers`` must be sent as one repeated form field per
+        number (``--form 'from_phone_numbers="+91..."'`` per Bolna's own
+        docs) — a single JSON-array-encoded field is read back literally as
+        one malformed number and rejected. ``retry_config`` is a JSON-encoded
+        string (multipart form fields carry strings).
         """
         data: dict[str, Any] = {"agent_id": agent_id}
-        if from_phone_numbers is not None:
+        if from_phone_numbers:
             data["from_phone_numbers"] = from_phone_numbers
         if retry_config is not None:
             data["retry_config"] = retry_config
@@ -131,8 +134,9 @@ class BolnaClient:
     async def schedule_batch(self, batch_id: str, payload: dict[str, Any]) -> Any:
         """POST /batches/{batch_id}/schedule — schedule a created batch.
 
-        Bolna's schedule endpoint expects multipart/form-data (NOT JSON), same
-        as create. Each field is sent as a form part via ``files={k:(None,v)}``.
+        The engine's schedule endpoint expects multipart/form-data (NOT JSON),
+        same as create. Each field is sent as a form part via
+        ``files={k:(None,v)}``.
         """
         form = {k: (None, str(v)) for k, v in payload.items()}
         return await self.request(

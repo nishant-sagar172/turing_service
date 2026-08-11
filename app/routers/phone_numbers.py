@@ -1,28 +1,32 @@
-"""/phone-numbers endpoint — lists available caller IDs for the frontend dropdown."""
-
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import TenantContext
 from app.config import Settings, get_settings
-from app.core.bolna_client import BolnaClient
-from app.dependencies import get_bolna_client
+from app.db.session import get_session
+from app.dependencies import get_current_tenant
 from app.schemas.phone_numbers import PhoneNumber, PhoneNumbersResponse
+from app.services import phone_number_sync
+from app.services.tenants import get_config
 
 router = APIRouter(prefix="/phone-numbers", tags=["phone-numbers"])
 
 
 @router.get("", response_model=PhoneNumbersResponse)
 async def list_phone_numbers(
-    client: BolnaClient = Depends(get_bolna_client),
+    tenant: TenantContext = Depends(get_current_tenant),
     settings: Settings = Depends(get_settings),
+    session: AsyncSession = Depends(get_session),
 ) -> PhoneNumbersResponse:
-    """List the account's owned numbers and the service's configured default.
+    assigned = await phone_number_sync.get_assigned_numbers(session, tenant.client_id)
+    numbers = [PhoneNumber(phone_number=n) for n in assigned]
 
-    Frontends populate the caller-ID dropdown from ``phone_numbers`` and
-    pre-select ``default_from_number``.
-    """
-    result = await client.list_phone_numbers()
-    numbers = [PhoneNumber.model_validate(item) for item in result]
+    config = await get_config(session, tenant.client_id)
+    default_from_number = (
+        config.default_from_number if config and config.default_from_number
+        else settings.voice_default_from_number
+    )
     return PhoneNumbersResponse(
-        default_from_number=settings.bolna_default_from_number,
+        default_from_number=default_from_number,
         phone_numbers=numbers,
     )

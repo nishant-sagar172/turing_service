@@ -1,66 +1,69 @@
-"""/v1/batches — campaign lifecycle over Bolna's batch APIs, persisted locally.
-
-Create (JSON recipients or raw CSV) -> schedule -> monitor (get/executions/
-metrics) -> stop/delete. Every batch is stored in turing's DB; executions are
-upserted as they surface (webhooks or the executions listing below).
-"""
-
 import json
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import TenantContext
 from app.config import Settings, get_settings
-from app.core.bolna_client import BolnaClient, BolnaError
+from app.core.voice_engine import VoiceEngineClient, VoiceEngineError
 from app.core.csv_utils import CONTACT_COLUMN, recipients_to_csv
 from app.db.models import Batch
 from app.db.session import get_session
-from app.dependencies import get_bolna_client
+from app.dependencies import get_current_tenant, get_voice_engine
 from app.schemas.batches import (
     BatchActionResponse,
+    BatchMetricsResponse,
     BatchSummary,
     CreateBatchRequest,
     CreateBatchResponse,
     ScheduleBatchRequest,
     ScheduleBatchResponse,
 )
-from app.schemas.calls import ExecutionResponse
+from app.schemas.calls import ExecutionResponse, RetryConfig
+from app.services import agent_sync
+from app.services.batch_sync import sync_batch_executions
 from app.services.store import (
     batch_metrics,
-    get_batch_by_bolna_id,
+    get_batch_by_voice_id,
     record_batch,
-    upsert_call_from_execution,
 )
+from app.services.tenants import get_config
 from app.services.variables import check, resolve_variables
 
 router = APIRouter(prefix="/batches", tags=["batches"])
 
-_BATCH_TERMINAL = {"completed", "stopped", "failed", "deleted"}
-
 
 def _default_webhook_url(settings: Settings) -> str | None:
-    """Bolna pushes execution updates here (turing's own receiver)."""
     if settings.turing_public_url:
-        return settings.turing_public_url.rstrip("/") + "/webhooks/bolna"
+        return settings.turing_public_url.rstrip("/") + "/webhooks/voice"
     return None
 
 
-def _encode_optional(from_phone_numbers, retry_config):
-    """JSON-encode the optional multipart form fields Bolna expects as strings."""
-    from_field = (
-        json.dumps(from_phone_numbers) if from_phone_numbers is not None else None
-    )
-    retry_field = (
-        json.dumps(retry_config.model_dump(exclude_none=True))
-        if retry_config is not None
-        else None
-    )
-    return from_field, retry_field
+def _encode_retry_config(retry_config: RetryConfig | None) -> str | None:
+    if retry_config is None:
+        return None
+    return json.dumps(retry_config.model_dump(exclude_none=True))
 
 
-async def _get_batch_or_404(session: AsyncSession, batch_id: str) -> Batch:
-    batch = await get_batch_by_bolna_id(session, batch_id)
+async def _resolve_from_numbers(
+    session: AsyncSession, tenant: TenantContext, settings: Settings,
+    requested: list[str] | None,
+) -> list[str] | None:
+    if requested is not None:
+        return requested
+    config = await get_config(session, tenant.client_id)
+    if config and config.default_from_number:
+        return [config.default_from_number]
+    if settings.voice_default_from_number:
+        return [settings.voice_default_from_number]
+    return None
+
+
+async def _get_batch_or_404(
+    session: AsyncSession, tenant: TenantContext, batch_id: str
+) -> Batch:
+    batch = await get_batch_by_voice_id(session, tenant.client_id, batch_id)
     if batch is None:
         raise HTTPException(
             status_code=404,
@@ -70,28 +73,35 @@ async def _get_batch_or_404(session: AsyncSession, batch_id: str) -> Batch:
     return batch
 
 
+async def _require_agent_enabled(
+    session: AsyncSession, tenant: TenantContext, agent_id: str
+) -> None:
+    if not await agent_sync.is_agent_enabled(session, tenant.client_id, agent_id):
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "agent_not_enabled",
+                    "message": f"Agent '{agent_id}' is not enabled for this client."},
+        )
+
+
 @router.post("", response_model=CreateBatchResponse, status_code=201)
 async def create_batch(
-    request: Request,
     body: CreateBatchRequest,
     validate: bool | None = None,
-    client: BolnaClient = Depends(get_bolna_client),
+    tenant: TenantContext = Depends(get_current_tenant),
+    voice_engine: VoiceEngineClient = Depends(get_voice_engine),
     settings: Settings = Depends(get_settings),
     session: AsyncSession = Depends(get_session),
 ) -> CreateBatchResponse:
-    """Create a batch from a JSON list of recipients (converted to CSV here).
+    await _require_agent_enabled(session, tenant, body.agent_id)
 
-    If ``from_phone_numbers`` is omitted, the configured default
-    (``BOLNA_DEFAULT_FROM_NUMBER``) is used when set.
-
-    Unless disabled, each recipient is validated against the agent's required
-    variables: any row missing one rejects the whole batch (422); variables no
-    row uses are returned as warnings.
-    """
     warnings: list[str] = []
     do_validate = settings.validate_agent_variables if validate is None else validate
     if do_validate:
-        contract = await resolve_variables(client, body.agent_id, settings)
+        contract = await resolve_variables(
+            voice_engine, body.agent_id, settings,
+            session=session, client_id=tenant.client_id,
+        )
         row_errors: list[dict[str, object]] = []
         extra_seen: set[str] = set()
         for index, recipient in enumerate(body.recipients):
@@ -116,17 +126,17 @@ async def create_batch(
             for name in sorted(extra_seen)
         ]
 
-    from_numbers = body.from_phone_numbers
-    if from_numbers is None and settings.bolna_default_from_number:
-        from_numbers = [settings.bolna_default_from_number]
+    from_numbers = await _resolve_from_numbers(
+        session, tenant, settings, body.from_phone_numbers
+    )
     csv_bytes = recipients_to_csv(body.recipients)
-    from_field, retry_field = _encode_optional(from_numbers, body.retry_config)
+    retry_field = _encode_retry_config(body.retry_config)
     webhook_url = body.webhook_url or _default_webhook_url(settings)
 
-    result = await client.create_batch(
+    result = await voice_engine.create_batch(
         agent_id=body.agent_id,
         csv_bytes=csv_bytes,
-        from_phone_numbers=from_field,
+        from_phone_numbers=from_numbers,
         retry_config=retry_field,
         webhook_url=webhook_url,
     )
@@ -135,7 +145,7 @@ async def create_batch(
 
     await record_batch(
         session,
-        client=getattr(request.state, "api_client", None),
+        client_id=tenant.client_id,
         agent_id=body.agent_id,
         from_number=from_numbers[0] if from_numbers else None,
         retry_config=(
@@ -144,7 +154,7 @@ async def create_batch(
         ),
         recipients=body.recipients,
         total_count=len(body.recipients),
-        bolna_batch_id=response.batch_id,
+        voice_batch_id=response.batch_id,
         status=response.state,
     )
     return response
@@ -152,48 +162,50 @@ async def create_batch(
 
 @router.post("/upload", response_model=CreateBatchResponse, status_code=201)
 async def create_batch_from_csv(
-    request: Request,
     agent_id: str = Form(...),
     file: UploadFile = File(...),
     from_phone_numbers: str | None = Form(
         default=None, description="JSON array string, e.g. [\"+91...\"].",
     ),
     webhook_url: str | None = Form(default=None),
-    client: BolnaClient = Depends(get_bolna_client),
+    tenant: TenantContext = Depends(get_current_tenant),
+    voice_engine: VoiceEngineClient = Depends(get_voice_engine),
     settings: Settings = Depends(get_settings),
     session: AsyncSession = Depends(get_session),
 ) -> CreateBatchResponse:
-    """Create a batch by uploading a raw CSV file (must have a contact_number column)."""
-    if from_phone_numbers is None and settings.bolna_default_from_number:
-        from_phone_numbers = json.dumps([settings.bolna_default_from_number])
+    await _require_agent_enabled(session, tenant, agent_id)
+
+    numbers: list[str] | None = None
+    if from_phone_numbers is not None:
+        try:
+            parsed = json.loads(from_phone_numbers)
+        except ValueError:
+            parsed = None
+        numbers = parsed if isinstance(parsed, list) and parsed else None
+    if numbers is None:
+        numbers = await _resolve_from_numbers(session, tenant, settings, None)
+
     csv_bytes = await file.read()
     total = max(csv_bytes.count(b"\n") - 1, 0)  # rows minus header (approx.)
 
-    result = await client.create_batch(
+    result = await voice_engine.create_batch(
         agent_id=agent_id,
         csv_bytes=csv_bytes,
         file_name=file.filename or "recipients.csv",
-        from_phone_numbers=from_phone_numbers,
+        from_phone_numbers=numbers,
         webhook_url=webhook_url or _default_webhook_url(settings),
     )
     response = CreateBatchResponse.model_validate(result)
 
-    first_from = None
-    if from_phone_numbers:
-        try:
-            parsed = json.loads(from_phone_numbers)
-            first_from = parsed[0] if isinstance(parsed, list) and parsed else None
-        except ValueError:
-            first_from = None
     await record_batch(
         session,
-        client=getattr(request.state, "api_client", None),
+        client_id=tenant.client_id,
         agent_id=agent_id,
-        from_number=first_from,
+        from_number=numbers[0] if numbers else None,
         retry_config=None,
         recipients=None,  # raw CSV: no structured snapshot
         total_count=total,
-        bolna_batch_id=response.batch_id,
+        voice_batch_id=response.batch_id,
         status=response.state,
     )
     return response
@@ -203,53 +215,112 @@ async def create_batch_from_csv(
 async def schedule_batch(
     batch_id: str,
     body: ScheduleBatchRequest,
-    client: BolnaClient = Depends(get_bolna_client),
+    tenant: TenantContext = Depends(get_current_tenant),
+    voice_engine: VoiceEngineClient = Depends(get_voice_engine),
     session: AsyncSession = Depends(get_session),
 ) -> ScheduleBatchResponse:
-    """Schedule a created batch to start (>= 2 min out; rounded to next 10 min)."""
-    result = await client.schedule_batch(batch_id, body.to_bolna_payload())
+    batch = await _get_batch_or_404(session, tenant, batch_id)
+
+    result = await voice_engine.schedule_batch(batch_id, body.to_voice_engine_payload())
     response = ScheduleBatchResponse.model_validate(result)
 
-    batch = await get_batch_by_bolna_id(session, batch_id)
-    if batch is not None:
-        batch.status = response.state or "scheduled"
-        batch.scheduled_at = body.scheduled_at
+    batch.status = response.state or "scheduled"
+    batch.scheduled_at = body.scheduled_at
     return response
+
+
+@router.get("", response_model=list[BatchSummary])
+async def list_batches(
+    agent_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    tenant: TenantContext = Depends(get_current_tenant),
+    session: AsyncSession = Depends(get_session),
+) -> list[BatchSummary]:
+    """All of this tenant's batches across every agent — unlike ``by-agent``,
+    which scopes to a single agent. Reads turing's own records only."""
+    filters = [Batch.client_id == tenant.client_id]
+    if agent_id:
+        filters.append(Batch.agent_id == agent_id)
+    if status:
+        filters.append(Batch.status == status)
+    result = await session.execute(
+        select(Batch).where(*filters).order_by(Batch.created_at.desc()).limit(200)
+    )
+    batches = result.scalars().all()
+    return [
+        BatchSummary.model_validate({
+            "batch_id": batch.voice_batch_id,
+            "internal_id": str(batch.id),
+            "status": batch.status,
+            "agent_id": batch.agent_id,
+            "scheduled_at": batch.scheduled_at,
+            "from_phone_numbers": [batch.from_number] if batch.from_number else None,
+            "valid_contacts": batch.valid_count,
+            "total_contacts": batch.total_count,
+            "created_at": batch.created_at.isoformat() if batch.created_at else None,
+            "updated_at": batch.updated_at.isoformat() if batch.updated_at else None,
+        })
+        for batch in batches
+    ]
 
 
 @router.get("/by-agent/{agent_id}", response_model=list[BatchSummary])
 async def list_agent_batches(
     agent_id: str,
-    client: BolnaClient = Depends(get_bolna_client),
+    tenant: TenantContext = Depends(get_current_tenant),
+    session: AsyncSession = Depends(get_session),
 ) -> list[BatchSummary]:
-    """List all batches created for an agent (live from Bolna)."""
-    result = await client.list_agent_batches(agent_id)
-    return [BatchSummary.model_validate(item) for item in result]
+    """Reads turing's own records, filtered by tenant — never the live voice
+    engine, which has no notion of tenants and would leak other clients'
+    batches for the same agent."""
+    result = await session.execute(
+        select(Batch).where(Batch.client_id == tenant.client_id, Batch.agent_id == agent_id)
+        .order_by(Batch.created_at.desc())
+    )
+    batches = result.scalars().all()
+    return [
+        BatchSummary.model_validate({
+            "batch_id": batch.voice_batch_id,
+            "internal_id": str(batch.id),
+            "status": batch.status,
+            "agent_id": batch.agent_id,
+            "scheduled_at": batch.scheduled_at,
+            "from_phone_numbers": [batch.from_number] if batch.from_number else None,
+            "valid_contacts": batch.valid_count,
+            "total_contacts": batch.total_count,
+            "created_at": batch.created_at.isoformat() if batch.created_at else None,
+            "updated_at": batch.updated_at.isoformat() if batch.updated_at else None,
+        })
+        for batch in batches
+    ]
 
 
 @router.get("/{batch_id}", response_model=BatchSummary)
 async def get_batch(
     batch_id: str,
-    client: BolnaClient = Depends(get_bolna_client),
+    tenant: TenantContext = Depends(get_current_tenant),
+    voice_engine: VoiceEngineClient = Depends(get_voice_engine),
     session: AsyncSession = Depends(get_session),
 ) -> BatchSummary:
-    """Get a batch's status — turing's record, refreshed from Bolna while live."""
-    batch = await _get_batch_or_404(session, batch_id)
+    batch = await _get_batch_or_404(session, tenant, batch_id)
 
-    if batch.status not in _BATCH_TERMINAL:
+    if batch.status not in {"completed", "stopped", "failed", "deleted"}:
         try:
-            live = await client.get_batch(batch_id)
+            live = await voice_engine.get_batch(batch_id)
             if isinstance(live, dict):
                 if live.get("status"):
                     batch.status = str(live["status"])
                 if live.get("valid_contacts") is not None:
                     batch.valid_count = live["valid_contacts"]
-        except BolnaError:
-            pass  # serve our record if Bolna is unreachable
+                if live.get("scheduled_at"):
+                    batch.scheduled_at = str(live["scheduled_at"])
+        except VoiceEngineError:
+            pass  # serve our record if the engine is unreachable
 
     return BatchSummary.model_validate(
         {
-            "batch_id": batch.bolna_batch_id,
+            "batch_id": batch.voice_batch_id,
+            "internal_id": str(batch.id),
             "status": batch.status,
             "agent_id": batch.agent_id,
             "scheduled_at": batch.scheduled_at,
@@ -265,61 +336,54 @@ async def get_batch(
 @router.get("/{batch_id}/executions", response_model=list[ExecutionResponse])
 async def get_batch_executions(
     batch_id: str,
-    client: BolnaClient = Depends(get_bolna_client),
+    background_tasks: BackgroundTasks,
+    tenant: TenantContext = Depends(get_current_tenant),
+    voice_engine: VoiceEngineClient = Depends(get_voice_engine),
     session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
 ) -> list[ExecutionResponse]:
-    """List per-call executions in a batch (live from Bolna, persisted here).
-
-    This is also the reconcile path: every execution row Bolna returns is
-    upserted into turing's DB, covering any missed webhooks.
-    """
-    await _get_batch_or_404(session, batch_id)
-    result = await client.get_batch_executions(batch_id)
-
-    responses: list[ExecutionResponse] = []
-    for item in result if isinstance(result, list) else []:
-        if isinstance(item, dict):
-            item.setdefault("batch_id", batch_id)
-            await upsert_call_from_execution(session, item)
-        responses.append(ExecutionResponse.model_validate(item))
-    return responses
+    """Also the reconcile path: every execution the engine returns is
+    upserted here, covering any missed webhooks."""
+    batch = await _get_batch_or_404(session, tenant, batch_id)
+    items = await sync_batch_executions(session, voice_engine, batch, background_tasks, settings)
+    return [ExecutionResponse.model_validate(item) for item in items]
 
 
-@router.get("/{batch_id}/metrics")
+@router.get("/{batch_id}/metrics", response_model=BatchMetricsResponse)
 async def get_batch_metrics(
     batch_id: str,
+    tenant: TenantContext = Depends(get_current_tenant),
     session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Basic campaign metrics from turing's records: counts, cost, success rate."""
-    batch = await _get_batch_or_404(session, batch_id)
-    return await batch_metrics(session, batch)
+) -> BatchMetricsResponse:
+    batch = await _get_batch_or_404(session, tenant, batch_id)
+    return BatchMetricsResponse(**(await batch_metrics(session, batch)))
 
 
 @router.post("/{batch_id}/stop", response_model=BatchActionResponse)
 async def stop_batch(
     batch_id: str,
-    client: BolnaClient = Depends(get_bolna_client),
+    tenant: TenantContext = Depends(get_current_tenant),
+    voice_engine: VoiceEngineClient = Depends(get_voice_engine),
     session: AsyncSession = Depends(get_session),
 ) -> BatchActionResponse:
-    """Halt a queued or running batch."""
-    result = await client.stop_batch(batch_id)
+    batch = await _get_batch_or_404(session, tenant, batch_id)
+
+    result = await voice_engine.stop_batch(batch_id)
     response = BatchActionResponse.model_validate(result)
-    batch = await get_batch_by_bolna_id(session, batch_id)
-    if batch is not None:
-        batch.status = response.state or "stopped"
+    batch.status = response.state or "stopped"
     return response
 
 
 @router.delete("/{batch_id}", response_model=BatchActionResponse)
 async def delete_batch(
     batch_id: str,
-    client: BolnaClient = Depends(get_bolna_client),
+    tenant: TenantContext = Depends(get_current_tenant),
+    voice_engine: VoiceEngineClient = Depends(get_voice_engine),
     session: AsyncSession = Depends(get_session),
 ) -> BatchActionResponse:
-    """Delete a batch on Bolna (turing keeps its historical record)."""
-    result = await client.delete_batch(batch_id)
+    batch = await _get_batch_or_404(session, tenant, batch_id)
+
+    result = await voice_engine.delete_batch(batch_id)
     response = BatchActionResponse.model_validate(result)
-    batch = await get_batch_by_bolna_id(session, batch_id)
-    if batch is not None:
-        batch.status = "deleted"
+    batch.status = "deleted"
     return response
