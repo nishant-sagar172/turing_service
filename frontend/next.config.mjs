@@ -7,6 +7,7 @@ const TURING_API_URL = process.env.TURING_API_URL || "http://localhost:8005";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "standalone",
   async rewrites() {
     return [
       {

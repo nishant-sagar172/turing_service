@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${TURING_PG_USER:-turing}
+      POSTGRES_PASSWORD: ${TURING_PG_PASSWORD}
+      POSTGRES_DB: ${TURING_PG_DB:-turing_db}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TURING_PG_USER:-turing}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --save ""
+      - --appendonly "no"
+      - --requirepass "${TURING_REDIS_PASSWORD}"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${TURING_REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${TURING_PG_USER:-turing}:${TURING_PG_PASSWORD}@postgres:5432/${TURING_PG_DB:-turing_db}"
+      REDIS_URL: "redis://:${TURING_REDIS_PASSWORD}@redis:6379/0"
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+      VOICE_ENGINE_API_KEY: ${VOICE_ENGINE_API_KEY}
+      VOICE_ENGINE_BASE_URL: ${VOICE_ENGINE_BASE_URL:-https://api.bolna.ai}
+      TURING_PUBLIC_URL: ${TURING_PUBLIC_URL}
+      VOICE_WEBHOOK_ALLOWED_IPS: ${VOICE_WEBHOOK_ALLOWED_IPS:-}
+      CONSOLE_PUBLIC_URL: ${CONSOLE_PUBLIC_URL}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+    ports:
+      - "8005:8005"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on: [backend]
+    environment:
+      TURING_API_URL: http://backend:8005
+      TURING_ADMIN_KEY: ${ADMIN_API_KEY}
+      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD}
+      OPERATOR_SESSION_SECRET: ${OPERATOR_SESSION_SECRET}
+    ports:
+      - "3001:3001"
+
+  # One-off migration runner:
+  #   docker compose -f docker-compose.prod.yml run --rm migrate
+  migrate:
+    build: .
+    profiles: [tools]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${TURING_PG_USER:-turing}:${TURING_PG_PASSWORD}@postgres:5432/${TURING_PG_DB:-turing_db}"
+    command: ["alembic", "upgrade", "head"]
+
+volumes:
+  pgdata:
