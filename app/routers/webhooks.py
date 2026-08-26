@@ -9,11 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.db.models import Batch
-from app.db.session import get_session, get_session_factory
+from app.db.session import get_session
 from app.dependencies import get_voice_engine
 from app.services import outcome_notifier
-from app.services.analysis import analyze_call, classify_by_status
-from app.services.analytics import CONNECTED, TERMINAL
+from app.services.analysis import run_analysis_for_call
+from app.services.analytics import TERMINAL
 from app.services.batch_sync import sync_batch_executions
 from app.services.store import (
     extract_voice_batch_id,
@@ -45,38 +45,6 @@ def _check_source_ip(request: Request, settings: Settings) -> None:
             status_code=403,
             detail={"error": "forbidden", "message": "Source IP not allowed."},
         )
-
-
-async def _run_analysis(call_id: str, settings: Settings) -> None:
-    """Background task: opens its own session, fetches call + config, runs analysis.
-
-    Completed calls with a transcript → LLM classifier.
-    All other terminal statuses (and completed with no transcript) → status-based auto-classifier.
-    """
-    import uuid as _uuid
-
-    try:
-        async with get_session_factory()() as session:
-            from app.db.models import Call, CallAnalysis
-            from sqlalchemy import select as _select
-
-            call = await session.get(Call, _uuid.UUID(call_id))
-            if call is None:
-                return
-            existing = await session.execute(
-                _select(CallAnalysis).where(CallAnalysis.call_id == call.id)
-            )
-            if existing.scalar_one_or_none() is not None:
-                return  # already analysed
-
-            if call.status in CONNECTED and call.transcript:
-                client_config = await get_config(session, call.client_id)
-                await analyze_call(session, call, settings, client_config)
-            else:
-                await classify_by_status(session, call)
-            await session.commit()
-    except Exception:
-        logger.exception("Background analysis failed for call_id=%s", call_id)
 
 
 async def _handle_batch_webhook(
@@ -171,6 +139,6 @@ async def voice_webhook(
 
     # Fire-and-forget analysis for all terminal calls.
     if call.status in TERMINAL:
-        background_tasks.add_task(_run_analysis, str(call.id), settings)
+        background_tasks.add_task(run_analysis_for_call, str(call.id), settings)
 
     return {"received": True, "execution_id": call.voice_call_id, "forwarded": forwarded}

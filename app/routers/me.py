@@ -11,11 +11,10 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import TenantContext
-from app.db.models import Client, ClientApiKey
+from app.db.models import Client
 from app.db.session import get_session
 from app.dependencies import get_current_tenant
 from app.schemas.admin import ClientConfigResponse, IssueKeyRequest, IssueKeyResponse, KeySummary

@@ -26,10 +26,10 @@ def _patch_structured(monkeypatch: Any, responses: Iterable[Any]) -> list[str]:
     iterator = iter(responses)
 
     async def fake_invoke(
-        prompt: str,
+        _prompt: str,
         output_model: type[Any],
-        tier: pipeline.ModelTier,
-        settings: SqlAgentSettings,
+        _tier: pipeline.ModelTier,
+        _settings: SqlAgentSettings,
     ) -> Any:
         calls.append(output_model.__name__)
         response = next(iterator)
@@ -70,7 +70,7 @@ def test_build_query_happy_path_returns_validated_sql(monkeypatch: Any) -> None:
 
     assert response.status == "built"
     assert response.validated is True
-    assert response.sql == "SELECT COUNT(*) AS patient_count FROM patients LIMIT 200"
+    assert response.sql == "SELECT COUNT(*) AS patient_count FROM patients LIMIT 2000"
     assert response.tables_used == ["patients"]
     assert calls == [
         "_PromptEnhanceResult",
@@ -169,7 +169,7 @@ def test_build_query_repairs_guard_failure(monkeypatch: Any) -> None:
     )
 
     assert response.status == "built"
-    assert response.sql == "SELECT COUNT(*) AS patient_count FROM patients LIMIT 200"
+    assert response.sql == "SELECT COUNT(*) AS patient_count FROM patients LIMIT 2000"
     assert response.explanation == "Corrected count."
 
 

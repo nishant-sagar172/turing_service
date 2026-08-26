@@ -18,15 +18,20 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 log = logging.getLogger("turing.rate_limit")
 
 # Fallback: in-process store mirrors the original register.py implementation.
 _attempts: dict[str, list[float]] = {}
 
+# Upper bound on tracked buckets, so a flood of unique source IPs during a
+# Redis outage cannot grow this dict without limit.
+_MAX_BUCKETS = 10_000
+
 
 async def hit(
-    redis,
+    redis: Any,
     *,
     bucket: str,
     limit: int,
@@ -45,21 +50,49 @@ async def hit(
     return _memory_hit(bucket=bucket, limit=limit, window_seconds=window_seconds)
 
 
-async def _redis_hit(redis, *, bucket: str, limit: int, window_seconds: int) -> bool:
+async def _redis_hit(redis: Any, *, bucket: str, limit: int, window_seconds: int) -> bool:
     key = f"turing:rl:{bucket}"
     async with redis.pipeline(transaction=False) as pipe:
         await pipe.incr(key)
-        await pipe.expire(key, window_seconds)
         results = await pipe.execute()
     count = results[0]
+    if count == 1:
+        # Set TTL only on the first hit so the window expires naturally regardless
+        # of ongoing traffic — resetting on every hit would lock out persistent
+        # callers forever by preventing the key from ever expiring.
+        await redis.expire(key, window_seconds)
     return count > limit
 
 
 def _memory_hit(*, bucket: str, limit: int, window_seconds: int) -> bool:
     now = time.monotonic()
+    _evict_stale(now, window_seconds)
     window = _attempts.setdefault(bucket, [])
     window[:] = [t for t in window if now - t < window_seconds]
     if len(window) >= limit:
         return True
     window.append(now)
     return False
+
+
+def _evict_stale(now: float, window_seconds: float) -> None:
+    """Drop buckets whose window has fully lapsed.
+
+    Without this, every distinct source IP that ever hits an open endpoint
+    leaks a dict entry for the life of the process — and this in-memory path is
+    precisely the Redis-down fallback, i.e. the long-lived degraded case.
+    """
+    stale = [
+        key
+        for key, hits in _attempts.items()
+        if not hits or now - hits[-1] >= window_seconds
+    ]
+    for key in stale:
+        del _attempts[key]
+
+    # Backstop: if a burst of unique buckets outpaces eviction, drop the
+    # oldest-touched entries rather than growing without bound.
+    if len(_attempts) > _MAX_BUCKETS:
+        oldest = sorted(_attempts, key=lambda k: _attempts[k][-1] if _attempts[k] else 0.0)
+        for key in oldest[: len(_attempts) - _MAX_BUCKETS]:
+            del _attempts[key]

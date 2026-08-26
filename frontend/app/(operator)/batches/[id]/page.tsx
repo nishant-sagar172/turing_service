@@ -9,6 +9,7 @@ import AudioPlayer from "@/components/AudioPlayer";
 import CallDetailDrawer from "@/components/CallDetailDrawer";
 import type {
   AnalyticsOverview,
+  BatchMetrics,
   BatchSummary,
   CallListItem,
   CallListResponse,
@@ -89,7 +90,7 @@ function BatchDetailInner() {
   const [adminBatch, setAdminBatch] = useState<ClientBatchSummary | null>(null);
   const [internalId, setInternalId] = useState<string | null>(null);
 
-  const [metrics, setMetrics] = useState<Record<string, unknown> | null>(null);
+  const [metrics, setMetrics] = useState<BatchMetrics | null>(null);
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
   const [calls, setCalls] = useState<CallListItem[]>([]);
   const [callsTotal, setCallsTotal] = useState(0);

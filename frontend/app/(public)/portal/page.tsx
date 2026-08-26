@@ -1,14 +1,19 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "../../../lib/api";
 import { getApiKey, setApiKey, clearApiKey } from "../../../lib/session";
 import Modal from "../../../components/Modal";
 import type { KeySummary, MeResponse } from "../../../lib/types";
 
 export default function PortalPage() {
+  const router = useRouter();
   const [signedIn, setSignedIn] = useState(false);
+  const [tab, setTab] = useState<"key" | "email">("key");
   const [inputKey, setInputKey] = useState("");
+  const [inputName, setInputName] = useState("");
+  const [inputEmail, setInputEmail] = useState("");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [keys, setKeys] = useState<KeySummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -55,6 +60,24 @@ export default function PortalPage() {
     setInputKey("");
   }
 
+  async function signInByEmail(e: React.FormEvent) {
+    e.preventDefault();
+    if (!inputName.trim() || !inputEmail.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.portalLookup(inputName.trim(), inputEmail.trim());
+      setApiKey(res.api_key);
+      setSignedIn(true);
+      setInputName("");
+      setInputEmail("");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Login failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function signOut() {
     clearApiKey();
     setMe(null);
@@ -94,25 +117,94 @@ export default function PortalPage() {
   if (!signedIn) {
     return (
       <main className="main public">
-        <div className="card page-enter">
-          <div style={{ marginBottom: 24 }}>
+        <div className="card page-enter" style={{ position: "relative" }}>
+          <button
+            onClick={() => router.back()}
+            aria-label="Go back"
+            style={{
+              position: "absolute", top: 12, right: 12,
+              background: "none", border: "1px solid var(--border)",
+              borderRadius: "var(--radius)", cursor: "pointer",
+              color: "var(--text-muted)", fontSize: 16, lineHeight: 1,
+              width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            ✕
+          </button>
+
+          <div style={{ marginBottom: 20 }}>
             <h1 style={{ fontSize: 20, marginBottom: 4 }}>Client Portal</h1>
-            <p className="subtitle" style={{ marginBottom: 0 }}>Enter your API key to manage your account.</p>
+            <p className="subtitle" style={{ marginBottom: 0 }}>Sign in to manage your account.</p>
           </div>
+
+          {/* Tab switcher */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid var(--border)", paddingBottom: 0 }}>
+            {(["key", "email"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => { setTab(t); setError(null); }}
+                style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  padding: "6px 12px", fontSize: 13, fontWeight: tab === t ? 600 : 400,
+                  color: tab === t ? "var(--text)" : "var(--text-muted)",
+                  borderBottom: tab === t ? "2px solid var(--accent)" : "2px solid transparent",
+                  marginBottom: -1,
+                }}
+              >
+                {t === "key" ? "API Key" : "Name & Email"}
+              </button>
+            ))}
+          </div>
+
           {error && <div className="error-box">{error}</div>}
-          <form onSubmit={signIn}>
-            <label>API Key</label>
-            <input
-              type="password"
-              value={inputKey}
-              onChange={(e) => setInputKey(e.target.value)}
-              placeholder="tk_…"
-              autoComplete="off"
-            />
-            <button type="submit" disabled={!inputKey.trim()} style={{ width: "100%" }}>
-              Sign in
+
+          {tab === "key" ? (
+            <form onSubmit={signIn}>
+              <label>API Key</label>
+              <input
+                type="password"
+                value={inputKey}
+                onChange={(e) => setInputKey(e.target.value)}
+                placeholder="tk_…"
+                autoComplete="off"
+              />
+              <button type="submit" disabled={!inputKey.trim()} style={{ width: "100%" }}>
+                Sign in
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={signInByEmail}>
+              <label>Client Name</label>
+              <input
+                type="text"
+                value={inputName}
+                onChange={(e) => setInputName(e.target.value)}
+                placeholder="Acme Hospital"
+                autoComplete="organization"
+              />
+              <label style={{ marginTop: 12 }}>Email</label>
+              <input
+                type="email"
+                value={inputEmail}
+                onChange={(e) => setInputEmail(e.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+              />
+              <button
+                type="submit"
+                disabled={!inputName.trim() || !inputEmail.trim() || loading}
+                style={{ width: "100%", marginTop: 4 }}
+              >
+                {loading ? <><span className="spinner" />Signing in…</> : "Sign in"}
+              </button>
+            </form>
+          )}
+
+          <p style={{ textAlign: "center", margin: "14px 0 0", fontSize: 13 }}>
+            <button className="secondary" onClick={() => router.back()} style={{ fontSize: 13, padding: "4px 12px" }}>
+              ← Go back
             </button>
-          </form>
+          </p>
         </div>
       </main>
     );
@@ -131,6 +223,7 @@ export default function PortalPage() {
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <span className={`badge ${me.status === "active" ? "ok" : "warn"}`}>{me.status}</span>
+              <button className="secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => router.back()}>← Back</button>
               <button className="secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={signOut}>Sign out</button>
             </div>
           </div>

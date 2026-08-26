@@ -99,6 +99,14 @@ class BatchSummary(BaseModel):
     updated_at: str | None = None
 
 
+class BatchListResponse(BaseModel):
+    items: list[BatchSummary]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+
+
 class BatchMetricsResponse(BaseModel):
     batch_id: str
     voice_batch_id: str | None

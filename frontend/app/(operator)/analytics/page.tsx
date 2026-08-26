@@ -87,47 +87,93 @@ function TimeseriesChart({ points }: { points: TimeseriesPoint[] }) {
   if (points.length === 0) return <p className="muted" style={{ fontSize: 13 }}>No data for this period.</p>;
 
   const maxTotal = Math.max(...points.map((p) => p.total), 1);
-  const barW = Math.max(8, Math.min(36, Math.floor(560 / points.length) - 4));
-  const chartH = 120;
+  const chartH = 140;
+  const leftPad = 30;   // room for y-axis labels
+  const rightPad = 8;
+  const xLabelH = 18;
+  const legendH = 28;
+  const svgW = 560;
+  const svgH = chartH + xLabelH + legendH;
+
+  // Bars fill the full usable width — single bars become wide, many bars become narrow
+  const usableW = svgW - leftPad - rightPad;
+  const barGap = points.length === 1 ? 0 : Math.max(3, Math.floor(usableW / points.length * 0.18));
+  const barW = Math.floor((usableW - barGap * Math.max(0, points.length - 1)) / points.length);
+
+  const gridFracs = [0.25, 0.5, 0.75, 1.0];
 
   return (
     <div style={{ overflowX: "auto" }}>
       <svg
-        viewBox={`0 0 ${Math.max(560, points.length * (barW + 4))} 148`}
-        style={{ width: "100%", height: 148, display: "block" }}
+        viewBox={`0 0 ${svgW} ${svgH}`}
+        style={{ width: "100%", height: svgH, display: "block" }}
         aria-label="Call volume timeseries"
       >
+        {/* Y-axis grid lines + labels */}
+        {gridFracs.map((frac) => {
+          const y = chartH * (1 - frac);
+          return (
+            <g key={frac}>
+              <line
+                x1={leftPad} y1={y} x2={svgW - rightPad} y2={y}
+                stroke="var(--border)" strokeWidth={1} strokeDasharray="3 4" opacity={0.6}
+              />
+              <text x={leftPad - 4} y={y + 3.5} textAnchor="end" fontSize={9} fill="var(--muted)">
+                {Math.round(frac * maxTotal)}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Baseline */}
+        <line
+          x1={leftPad} y1={chartH} x2={svgW - rightPad} y2={chartH}
+          stroke="var(--border)" strokeWidth={1}
+        />
+
+        {/* Bars */}
         {points.map((p, i) => {
           const totalH = (p.total / maxTotal) * chartH;
           const connH = (p.connected / maxTotal) * chartH;
           const ncH = ((p.not_connected ?? 0) / maxTotal) * chartH;
-          const x = i * (barW + 4);
+          const x = leftPad + i * (barW + barGap);
+          const showLabel =
+            points.length <= 7 ||
+            i === 0 ||
+            i === points.length - 1 ||
+            i % Math.ceil(points.length / 6) === 0;
+
           return (
             <g key={p.date}>
-              {/* total bar (faint background) */}
+              {/* total background */}
               <rect x={x} y={chartH - totalH} width={barW} height={totalH}
-                fill="rgba(79,140,255,0.13)" rx={3} />
-              {/* not-connected bar (red, anchored to bottom) */}
-              <rect x={x} y={chartH - ncH} width={barW} height={ncH}
-                fill="rgba(239,68,68,0.55)" rx={3} />
-              {/* connected bar (blue, stacked above not-connected) */}
-              <rect x={x} y={chartH - ncH - connH} width={barW} height={connH}
-                fill="rgba(79,140,255,0.75)" rx={3} />
-              {(i === 0 || i === points.length - 1 || (points.length > 6 && i % Math.ceil(points.length / 6) === 0)) && (
-                <text x={x + barW / 2} y={chartH + 14} textAnchor="middle" fontSize={9} fill="var(--muted)">
+                fill="rgba(79,140,255,0.10)" rx={3} />
+              {/* not-connected (bottom portion) */}
+              {ncH > 0 && (
+                <rect x={x} y={chartH - ncH} width={barW} height={ncH}
+                  fill="rgba(239,68,68,0.50)" rx={3} />
+              )}
+              {/* connected (stacked above not-connected) */}
+              {connH > 0 && (
+                <rect x={x} y={chartH - ncH - connH} width={barW} height={connH}
+                  fill="rgba(79,140,255,0.75)" rx={3} />
+              )}
+              {showLabel && (
+                <text x={x + barW / 2} y={chartH + 13} textAnchor="middle" fontSize={9} fill="var(--muted)">
                   {p.date.slice(5)}
                 </text>
               )}
             </g>
           );
         })}
-        {/* legend */}
-        <rect x={0} y={chartH + 22} width={10} height={8} fill="rgba(79,140,255,0.75)" rx={2} />
-        <text x={14} y={chartH + 30} fontSize={9} fill="var(--muted)">Connected</text>
-        <rect x={72} y={chartH + 22} width={10} height={8} fill="rgba(239,68,68,0.55)" rx={2} />
-        <text x={86} y={chartH + 30} fontSize={9} fill="var(--muted)">Not connected</text>
-        <rect x={168} y={chartH + 22} width={10} height={8} fill="rgba(79,140,255,0.13)" rx={2} />
-        <text x={182} y={chartH + 30} fontSize={9} fill="var(--muted)">Total</text>
+
+        {/* Legend */}
+        <rect x={leftPad} y={chartH + xLabelH + 4} width={10} height={8} fill="rgba(79,140,255,0.75)" rx={2} />
+        <text x={leftPad + 14} y={chartH + xLabelH + 12} fontSize={9} fill="var(--muted)">Connected</text>
+        <rect x={leftPad + 80} y={chartH + xLabelH + 4} width={10} height={8} fill="rgba(239,68,68,0.50)" rx={2} />
+        <text x={leftPad + 94} y={chartH + xLabelH + 12} fontSize={9} fill="var(--muted)">Not connected</text>
+        <rect x={leftPad + 186} y={chartH + xLabelH + 4} width={10} height={8} fill="rgba(79,140,255,0.10)" rx={2} />
+        <text x={leftPad + 200} y={chartH + xLabelH + 12} fontSize={9} fill="var(--muted)">Total (background)</text>
       </svg>
     </div>
   );

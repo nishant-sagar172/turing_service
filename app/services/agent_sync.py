@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,11 +33,12 @@ async def sync_catalog(
     for item in agents if isinstance(agents, list) else []:
         if not isinstance(item, dict):
             continue
-        voice_agent_id = str(item.get("id") or "")
+        item_d = cast(dict[str, Any], item)
+        voice_agent_id = str(item_d.get("id") or "")
         if not voice_agent_id:
             continue
         seen_ids.add(voice_agent_id)
-        await _upsert_agent(session, voice_agent_id, item, now)
+        await _upsert_agent(session, voice_agent_id, item_d, now)
 
     newly_missing = await _mark_missing(session, seen_ids, now)
     drift_events = await _detect_drift(session, newly_missing)
@@ -208,8 +209,6 @@ async def list_client_agent_config(
     Returns drifted (catalog-missing) agents too so the admin can see and
     explicitly handle them rather than having them silently disappear.
     """
-    from sqlalchemy.orm import outerjoin
-
     result = await session.execute(
         select(ClientAgentConfig, AgentCatalog)
         .outerjoin(
@@ -244,7 +243,7 @@ async def update_client_agent_config(
     voice_agent_id: str,
     *,
     display_name: str | None = None,
-    variable_overrides: dict | None = None,
+    variable_overrides: dict[str, Any] | None = None,
 ) -> ClientAgentConfig:
     """Upsert per-agent display_name / variable_overrides for one client."""
     result = await session.execute(

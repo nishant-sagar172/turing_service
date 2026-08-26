@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { publicApi } from "../../../lib/publicApi";
 
 export default function RegisterPage() {
@@ -36,6 +37,11 @@ export default function RegisterPage() {
           <h1 style={{ fontSize: 20, marginBottom: 8 }}>Request received</h1>
           <p style={{ color: "var(--muted)", margin: 0 }}>
             We&apos;ll review your request and send you an API key once approved.
+          </p>
+          <p style={{ marginTop: 20, marginBottom: 0 }}>
+            <Link href="/portal" style={{ fontSize: 13, color: "var(--muted)" }}>
+              Already have an API key? Sign in →
+            </Link>
           </p>
         </div>
       </main>
@@ -80,6 +86,11 @@ export default function RegisterPage() {
             {busy ? <><span className="spinner" />Submitting…</> : "Request access"}
           </button>
         </form>
+
+        <div style={{ marginTop: 20, display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--muted)" }}>
+          <Link href="/portal">Already have an API key? Sign in →</Link>
+          <Link href="/login">Operator login →</Link>
+        </div>
       </div>
     </main>
   );

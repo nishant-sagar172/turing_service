@@ -8,7 +8,7 @@ own ``error`` key, e.g. variable-validation 422s) are preserved in ``detail``.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -65,11 +65,12 @@ def register_error_handlers(app: FastAPI) -> None:
         detail = exc.detail
         if isinstance(detail, dict) and "error" in detail:
             # Structured error raised by our own code (e.g. missing variables).
+            d = cast(dict[str, Any], detail)
             return envelope(
                 request,
                 status_code=exc.status_code,
-                error=str(detail.get("error")),
-                message=str(detail.get("message") or detail.get("error")),
+                error=str(d.get("error")),
+                message=str(d.get("message") or d.get("error")),
                 detail=detail,
             )
         return envelope(

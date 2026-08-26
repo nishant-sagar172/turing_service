@@ -153,4 +153,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Return a cached Settings instance (single load per process)."""
-    return Settings()
+    return Settings()  # type: ignore[call-arg]

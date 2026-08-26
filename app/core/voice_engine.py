@@ -12,9 +12,33 @@ is passed, ``multipart/form-data`` when ``files=``/``data=`` are passed.
 
 from __future__ import annotations
 
+import asyncio
+import json as jsonlib
+import logging
 from typing import Any
 
 import httpx
+
+log = logging.getLogger(__name__)
+
+# Transient-transport retry budget. Applied to idempotent requests only; see
+# ``VoiceEngineClient.request``.
+_MAX_TRANSPORT_ATTEMPTS = 3
+_RETRY_BACKOFF_S = 0.5
+
+
+def _form_value(value: Any) -> str:
+    """Render a payload value for a multipart form part.
+
+    A blanket ``str()`` is wrong here: ``str(True)`` is ``"True"``, which a
+    case-sensitive boolean parser upstream will not read as true, and
+    ``str({...})`` is a Python repr rather than JSON.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (dict, list)):
+        return jsonlib.dumps(value)
+    return str(value)
 
 
 class VoiceEngineError(Exception):
@@ -34,7 +58,7 @@ class VoiceEngineError(Exception):
 class VoiceEngineClient:
     """Async wrapper around the upstream voice engine's REST API."""
 
-    def __init__(self, api_key: str, base_url: str = "https://api.bolna.ai",
+    def __init__(self, api_key: str, base_url: str,
                  timeout: float = 30.0) -> None:
         self._base_url = base_url.rstrip("/")
         # NOTE: no default Content-Type — httpx picks JSON vs multipart per call.
@@ -62,23 +86,42 @@ class VoiceEngineClient:
         Raises:
             VoiceEngineError: on transport failure or a non-2xx response.
         """
-        try:
-            response = await self._client.request(
-                method, path, json=json, params=params, data=data, files=files,
-            )
-        except httpx.RequestError as exc:  # DNS, connection, timeout, etc.
-            raise VoiceEngineError(
-                f"Failed to reach voice engine at {self._base_url}{path}: {exc}"
-            ) from exc
+        # Retry transient transport failures for idempotent requests only. A
+        # received non-2xx is never retried (it is a real application error),
+        # and non-GET verbs are never retried because a duplicate POST could
+        # place a second patient call or create a second batch.
+        attempts = _MAX_TRANSPORT_ATTEMPTS if method.upper() == "GET" else 1
 
-        if response.is_error:
-            raise VoiceEngineError(
-                f"Voice engine returned {response.status_code} for {method} {path}",
-                status_code=response.status_code,
-                payload=_safe_json(response),
-            )
+        for attempt in range(attempts):
+            try:
+                response = await self._client.request(
+                    method, path, json=json, params=params, data=data, files=files,
+                )
+            except httpx.RequestError as exc:  # DNS, connection, timeout, etc.
+                if attempt + 1 >= attempts:
+                    raise VoiceEngineError(
+                        f"Failed to reach voice engine at {self._base_url}{path}: {exc}"
+                    ) from exc
+                await asyncio.sleep(_RETRY_BACKOFF_S * (2**attempt))
+                continue
 
-        return _safe_json(response)
+            if response.is_error:
+                error_payload = _safe_json(response)
+                log.error(
+                    "voice engine error: %s %s → %s | body: %s",
+                    method, path, response.status_code, error_payload,
+                )
+                raise VoiceEngineError(
+                    f"Voice engine returned {response.status_code} for {method} {path}",
+                    status_code=response.status_code,
+                    payload=error_payload,
+                )
+
+            return _safe_json(response)
+
+        raise VoiceEngineError(
+            f"Failed to reach voice engine at {self._base_url}{path}: retries exhausted"
+        )
 
     async def get_user(self) -> Any:
         """GET /user/me — account info. Used as the connectivity probe."""
@@ -138,7 +181,8 @@ class VoiceEngineClient:
         same as create. Each field is sent as a form part via
         ``files={k:(None,v)}``.
         """
-        form = {k: (None, str(v)) for k, v in payload.items()}
+        form = {k: (None, _form_value(v)) for k, v in payload.items()}
+        log.info("schedule_batch: batch_id=%s payload=%s", batch_id, payload)
         return await self.request(
             "POST", f"/batches/{batch_id}/schedule", files=form,
         )

@@ -14,14 +14,14 @@ export interface VoiceEngineStatus {
   detail?: string | null;
 }
 
+// Mirrors app/schemas/agents.py::AgentSummary — the only backend shape this
+// type is used for (GET /v1/agents). `id` is always present; the rest are
+// genuinely optional on the backend model.
 export interface Agent {
-  id?: string;
-  agent_name?: string;
-  agent_type?: string;
-  agent_status?: string;
-  created_at?: string;
-  updated_at?: string;
-  [key: string]: unknown;
+  id: string;
+  agent_name?: string | null;
+  agent_status?: string | null;
+  display_name?: string | null;
 }
 
 export interface AgentVariables {
@@ -32,15 +32,18 @@ export interface AgentVariables {
   all_prompt_variables: string[];
 }
 
+// Mirrors app/schemas/phone_numbers.py::PhoneNumber — every field is
+// genuinely optional on the backend model (extra="allow" preserves any
+// additional Bolna fields at runtime, but nothing in the frontend reads them
+// by name, so there is no typed field to add here).
 export interface PhoneNumber {
-  id?: string;
-  phone_number?: string;
-  agent_id?: string;
-  telephony_provider?: string;
-  rented?: boolean;
-  price?: string;
-  renewal_at?: string;
-  [key: string]: unknown;
+  id?: string | null;
+  phone_number?: string | null;
+  agent_id?: string | null;
+  telephony_provider?: string | null;
+  rented?: boolean | null;
+  price?: string | null;
+  renewal_at?: string | null;
 }
 
 export interface PhoneNumbersResponse {
@@ -62,17 +65,19 @@ export interface MakeCallResponse {
   execution_id?: string;
 }
 
+// Mirrors app/schemas/calls.py::ExecutionResponse — every field is genuinely
+// optional on the backend model (extra="allow" preserves any additional
+// Bolna fields at runtime; the frontend only reads the named fields below).
 export interface Execution {
-  id?: string;
-  agent_id?: string;
-  status?: string;
-  conversation_duration?: number;
-  total_cost?: number;
-  transcript?: string;
+  id?: string | null;
+  agent_id?: string | null;
+  status?: string | null;
+  conversation_duration?: number | null;
+  total_cost?: number | null;
+  transcript?: string | null;
   extracted_data?: Record<string, unknown> | null;
   telephony_data?: Record<string, unknown> | null;
-  error_message?: string;
-  [key: string]: unknown;
+  error_message?: string | null;
 }
 
 export interface CreateBatchRequest {
@@ -92,19 +97,22 @@ export interface ScheduleBatchResponse {
   state?: string;
 }
 
+// Mirrors app/schemas/batches.py::BatchSummary — every field is genuinely
+// optional on the backend model (extra="allow" preserves any additional
+// Bolna fields at runtime; the frontend only reads the named fields below).
 export interface BatchSummary {
-  batch_id?: string;
-  internal_id?: string;
-  status?: string;
-  scheduled_at?: string;
-  file_name?: string;
-  valid_contacts?: number;
-  total_contacts?: number;
-  from_phone_numbers?: string[];
-  execution_status?: Record<string, unknown>;
-  created_at?: string;
-  agent_id?: string;
-  [key: string]: unknown;
+  batch_id?: string | null;
+  internal_id?: string | null;
+  status?: string | null;
+  scheduled_at?: string | null;
+  file_name?: string | null;
+  valid_contacts?: number | null;
+  total_contacts?: number | null;
+  from_phone_numbers?: string[] | null;
+  execution_status?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  agent_id?: string | null;
 }
 
 // ── Admin types ──────────────────────────────────────────────────────────────
@@ -202,6 +210,23 @@ export interface SyncResult {
   synced: number;
   removed: number;
   drift_events: number;
+}
+
+// Mirrors app/schemas/batches.py::BatchMetricsResponse (GET /v1/batches/{id}/metrics).
+// No extra="allow" on the backend model, so every field below is exactly
+// what the endpoint returns — no index signature needed.
+export interface BatchMetrics {
+  batch_id: string;
+  voice_batch_id: string | null;
+  status: string;
+  total_recipients: number;
+  calls_tracked: number;
+  by_status: Record<string, number>;
+  completed: number;
+  terminal: number;
+  success_rate: number | null;
+  total_cost: number;
+  avg_duration_seconds: number | null;
 }
 
 export interface ClientBatchSummary {

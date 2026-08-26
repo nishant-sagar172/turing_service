@@ -9,6 +9,7 @@ import type {
   AgentVariables,
   AnalyticsOverview,
   AgentStats,
+  BatchMetrics,
   BatchStats,
   BatchCreateResponse,
   BatchSummary,
@@ -68,7 +69,7 @@ export const api = {
   listAgentBatches: (agentId: string) => req<BatchSummary[]>(`/v1/batches/by-agent/${agentId}`),
   getBatch: (id: string) => req<BatchSummary>(`/v1/batches/${id}`),
   getBatchExecutions: (id: string) => req<Execution[]>(`/v1/batches/${id}/executions`),
-  getBatchMetrics: (id: string) => req<Record<string, unknown>>(`/v1/batches/${id}/metrics`),
+  getBatchMetrics: (id: string) => req<BatchMetrics>(`/v1/batches/${id}/metrics`),
   stopBatch: (id: string) =>
     req<{ message?: string; state?: string }>(`/v1/batches/${id}/stop`, { method: "POST" }),
   deleteBatch: (id: string) =>
@@ -101,4 +102,11 @@ export const api = {
     }),
   revokeMyKey: (keyId: string) =>
     req<void>(`/v1/me/keys/${keyId}`, { method: "DELETE" }),
+
+  // Open — no API key required; resolves active client by name + email
+  portalLookup: (name: string, email: string) =>
+    rawReq<{ key_id: string; api_key: string }>(`${BASE}/v1/portal/lookup`, {
+      method: "POST",
+      body: JSON.stringify({ name, email }),
+    }),
 };

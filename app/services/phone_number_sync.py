@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,11 +31,12 @@ async def sync_catalog(
     for item in numbers if isinstance(numbers, list) else []:
         if not isinstance(item, dict):
             continue
-        number = str(item.get("phone_number") or "").strip()
+        item_d = cast(dict[str, Any], item)
+        number = str(item_d.get("phone_number") or "").strip()
         if not number:
             continue
         seen.add(number)
-        await _upsert(session, number, item, now)
+        await _upsert(session, number, item_d, now)
 
     removed = await _mark_missing(session, seen, now)
     await session.flush()

@@ -17,6 +17,27 @@ cp .env.local.example .env.local   # then set TURING_API_URL
 
 Default: `http://localhost:8005`.
 
+## Operator console login
+
+The operator console (`(operator)` routes) sits behind a shared-password
+login, separate from the tenant portal's API-key sign-in. Set in `.env.local`:
+
+```bash
+OPERATOR_PASSWORD=some-strong-shared-password
+OPERATOR_SESSION_SECRET=a-long-random-string   # signs the session cookie (HMAC-SHA256)
+```
+
+`POST /api/login` with `{ "password": "..." }` sets a signed `turing_operator`
+cookie; `DELETE /api/login` clears it. `middleware.ts` redirects unauthenticated
+requests for operator pages to `/login`. The real authorization check lives in
+`/proxy/admin/[...path]/route.ts` (via `lib/operatorSession.ts`), which verifies
+the cookie's HMAC before it will forward `X-Admin-Key` to the backend — the
+middleware check is edge-runtime and format-only, not the security boundary.
+
+If either env var is unset, `/api/login` returns 503 and the operator console
+is effectively disabled (matching how `TURING_ADMIN_KEY` unset returns 404 from
+the admin proxy).
+
 ## Run
 
 ```bash

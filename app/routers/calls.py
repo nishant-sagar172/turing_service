@@ -12,41 +12,42 @@ from sqlalchemy.orm import selectinload
 from app.auth import TenantContext
 from app.config import Settings, get_settings
 from app.core.voice_engine import VoiceEngineClient, VoiceEngineError
-from app.db.models import Batch, Call, CallAnalysis
+from app.db.models import Call, CallAnalysis
 from app.db.session import get_session
 from app.dependencies import get_current_tenant, get_voice_engine
 from app.schemas.analysis import CallAnalysisResult, CallDetail, CallListItem, CallListResponse
-from app.schemas.calls import ExecutionResponse, StopCallResponse
+from app.schemas.calls import MakeCallRequest, MakeCallResponse, StopCallResponse
+from app.services import agent_sync
 from app.services.analysis import analyze_call
-from app.services.store import TERMINAL_STATUSES, get_call_by_voice_id, upsert_call_from_execution
+from app.services.store import TERMINAL_STATUSES, get_call_by_voice_id, record_call, upsert_call_from_execution
 from app.services.tenants import get_config
+from app.services.variables import check, resolve_variables
 
 router = APIRouter(prefix="/calls", tags=["calls"])
 
 
+async def _require_agent_enabled(
+    session: AsyncSession, tenant: TenantContext, agent_id: str
+) -> None:
+    if not await agent_sync.is_agent_enabled(session, tenant.client_id, agent_id):
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "agent_not_enabled",
+                    "message": f"Agent '{agent_id}' is not enabled for this client."},
+        )
+
+
 def _analysis_result(analysis: CallAnalysis | None) -> CallAnalysisResult | None:
-    if analysis is None:
-        return None
-    return CallAnalysisResult(
-        outcome=analysis.outcome,
-        summary=analysis.summary,
-        reason=analysis.reason,
-        requests=analysis.requests or [],
-        urgency=analysis.urgency,
-        confidence=analysis.confidence,
-        symptoms_reported=analysis.symptoms_reported or [],
-        model_used=analysis.model_used,
-        analyzed_at=analysis.analyzed_at,
-    )
+    return CallAnalysisResult.from_model(analysis)
 
 
-def _call_list_item(call: Call, from_number: str | None) -> CallListItem:
+def _call_list_item(call: Call) -> CallListItem:
     return CallListItem(
         call_id=call.voice_call_id,
         agent_id=call.agent_id,
         batch_id=call.batch_id,
         contact_number=call.contact_number,
-        from_number=from_number,
+        from_number=call.batch.from_number if call.batch else None,
         status=call.status,
         duration=call.duration,
         cost=call.cost,
@@ -57,11 +58,70 @@ def _call_list_item(call: Call, from_number: str | None) -> CallListItem:
     )
 
 
-async def _resolve_from_number(session: AsyncSession, call: Call) -> str | None:
-    if call.batch_id is None:
-        return None
-    batch = await session.get(Batch, call.batch_id)
-    return batch.from_number if batch else None
+@router.post("", response_model=MakeCallResponse, status_code=201)
+async def make_call(
+    body: MakeCallRequest,
+    validate: bool | None = None,
+    tenant: TenantContext = Depends(get_current_tenant),
+    voice_engine: VoiceEngineClient = Depends(get_voice_engine),
+    settings: Settings = Depends(get_settings),
+    session: AsyncSession = Depends(get_session),
+) -> MakeCallResponse:
+    await _require_agent_enabled(session, tenant, body.agent_id)
+
+    warnings: list[str] = []
+    do_validate = settings.validate_agent_variables if validate is None else validate
+    if do_validate and body.user_data:
+        contract = await resolve_variables(
+            voice_engine, body.agent_id, settings,
+            session=session, client_id=tenant.client_id,
+        )
+        provided = set(body.user_data.keys())
+        missing, extra = check(provided, contract)
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "missing_required_variables",
+                    "agent_id": body.agent_id,
+                    "required": contract["required"],
+                    "optional": contract["optional"],
+                    "missing": missing,
+                },
+            )
+        warnings = [
+            f"variable '{name}' was sent but the agent's prompt does not use it"
+            for name in sorted(extra)
+        ]
+
+    # body → tenant config → global settings
+    from_phone_number = body.from_phone_number
+    if from_phone_number is None:
+        config = await get_config(session, tenant.client_id)
+        if config and config.default_from_number:
+            from_phone_number = config.default_from_number
+        elif settings.voice_default_from_number:
+            from_phone_number = settings.voice_default_from_number
+
+    payload = body.to_voice_engine_payload()
+    if from_phone_number and "from_phone_number" not in payload:
+        payload["from_phone_number"] = from_phone_number
+
+    result = await voice_engine.make_call(payload)
+    response = MakeCallResponse.model_validate(result)
+    response.warnings = warnings
+
+    if response.execution_id:
+        await record_call(
+            session,
+            client_id=tenant.client_id,
+            agent_id=body.agent_id,
+            voice_call_id=response.execution_id,
+            contact_number=body.recipient_phone_number,
+            status=response.status or "queued",
+        )
+
+    return response
 
 
 @router.get("", response_model=CallListResponse)
@@ -100,7 +160,9 @@ async def list_calls(
     needs_analysis_join = bool(outcome or urgency)
 
     count_query = select(func.count()).select_from(Call)
-    page_query = select(Call).options(selectinload(Call.analysis))
+    page_query = select(Call).options(
+        selectinload(Call.analysis), selectinload(Call.batch)
+    )
     if needs_analysis_join:
         count_query = count_query.join(CallAnalysis, CallAnalysis.call_id == Call.id)
         page_query = page_query.join(CallAnalysis, CallAnalysis.call_id == Call.id)
@@ -117,10 +179,7 @@ async def list_calls(
     )
     calls = rows.scalars().all()
 
-    items: list[CallListItem] = []
-    for call in calls:
-        from_number = await _resolve_from_number(session, call)
-        items.append(_call_list_item(call, from_number))
+    items = [_call_list_item(call) for call in calls]
 
     return CallListResponse(
         items=items,
@@ -160,7 +219,10 @@ async def get_call(
         select(CallAnalysis).where(CallAnalysis.call_id == call.id)
     )).scalar_one_or_none()
 
-    from_number = await _resolve_from_number(session, call)
+    from_number: str | None = None
+    if call.batch_id is not None:
+        await session.refresh(call, attribute_names=["batch"])
+        from_number = call.batch.from_number if call.batch else None
 
     return CallDetail(
         call_id=call.voice_call_id,
@@ -236,14 +298,6 @@ async def analyze_call_endpoint(
                     "message": "LLM analysis failed. Check API key configuration."},
         )
 
-    return CallAnalysisResult(
-        outcome=analysis.outcome,
-        summary=analysis.summary,
-        reason=analysis.reason,
-        requests=analysis.requests or [],
-        urgency=analysis.urgency,
-        confidence=analysis.confidence,
-        symptoms_reported=analysis.symptoms_reported or [],
-        model_used=analysis.model_used,
-        analyzed_at=analysis.analyzed_at,
-    )
+    result = CallAnalysisResult.from_model(analysis)
+    assert result is not None  # analysis is non-None here
+    return result

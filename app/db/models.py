@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -132,7 +134,7 @@ class AgentCatalog(TimestampMixin, Base):
     voice_agent_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     agent_name: Mapped[str | None] = mapped_column(String(256))
     agent_status: Mapped[str | None] = mapped_column(String(32))
-    snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     is_present: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     first_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -158,7 +160,7 @@ class ClientAgentConfig(TimestampMixin, Base):
     voice_agent_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(256))
-    variable_overrides: Mapped[dict | None] = mapped_column(JSONB)
+    variable_overrides: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     client: Mapped[Client] = relationship(back_populates="agent_configs")
 
@@ -176,7 +178,7 @@ class PhoneNumberCatalog(TimestampMixin, Base):
     rented: Mapped[bool | None] = mapped_column(Boolean)
     renewal_at: Mapped[str | None] = mapped_column(String(64))
     is_present: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     client_assignments: Mapped[list[ClientPhoneNumber]] = relationship(
@@ -247,7 +249,7 @@ class Batch(TimestampMixin, Base):
     total_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     valid_count: Mapped[int | None] = mapped_column(Integer)
     scheduled_at: Mapped[str | None] = mapped_column(String(64))
-    recipients_snapshot: Mapped[list | None] = mapped_column(JSONB)
+    recipients_snapshot: Mapped[list[Any] | None] = mapped_column(JSONB)
 
     calls: Mapped[list[Call]] = relationship(back_populates="batch")
 
@@ -277,8 +279,12 @@ class Call(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
     transcript: Mapped[str | None] = mapped_column(Text)
     recording_url: Mapped[str | None] = mapped_column(Text)
-    extracted_data: Mapped[dict | None] = mapped_column(JSONB)
+    extracted_data: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     cost: Mapped[float | None] = mapped_column(Float)
+    # Integer minor units, written alongside `cost` so aggregates can migrate off
+    # binary-float money (which accumulates rounding error across large sums on
+    # billing-adjacent figures). `cost` stays authoritative until readers move.
+    cost_cents: Mapped[int | None] = mapped_column(Integer)
     duration: Mapped[float | None] = mapped_column(Float)
     hangup_reason: Mapped[str | None] = mapped_column(String(128))
     retry_count: Mapped[int | None] = mapped_column(Integer)
@@ -291,6 +297,9 @@ class Call(TimestampMixin, Base):
 
     __table_args__ = (
         UniqueConstraint("client_id", "voice_call_id", name="uq_call_client_voice_id"),
+        # Serves the tenant + date-range predicate every analytics query applies,
+        # and the date_trunc grouping in the timeseries endpoint.
+        Index("ix_calls_client_created", "client_id", "created_at"),
     )
 
 
@@ -317,13 +326,13 @@ class CallAnalysis(TimestampMixin, Base):
     outcome: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     summary: Mapped[str | None] = mapped_column(Text)
     reason: Mapped[str | None] = mapped_column(Text)
-    requests: Mapped[list | None] = mapped_column(JSONB)
+    requests: Mapped[list[str] | None] = mapped_column(JSONB)
     urgency: Mapped[str | None] = mapped_column(String(16), index=True)
     confidence: Mapped[float | None] = mapped_column(Float)
-    symptoms_reported: Mapped[list | None] = mapped_column(JSONB)
+    symptoms_reported: Mapped[list[str] | None] = mapped_column(JSONB)
     model_used: Mapped[str | None] = mapped_column(String(128))
     analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    raw_llm_response: Mapped[dict | None] = mapped_column(JSONB)
+    raw_llm_response: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     call: Mapped[Call] = relationship(back_populates="analysis")
 

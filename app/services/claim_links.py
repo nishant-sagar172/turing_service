@@ -23,6 +23,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from app.auth import hash_key
 
@@ -42,7 +43,7 @@ def _redis_key(token: str) -> str:
 
 
 async def create(
-    redis,
+    redis: Any,
     *,
     client_id: uuid.UUID,
     client_name: str,
@@ -77,7 +78,7 @@ async def create(
         return None
 
 
-async def peek(redis, token: str) -> ClaimPeek | None:
+async def peek(redis: Any, token: str) -> ClaimPeek | None:
     """Non-destructive read: returns claim metadata or None if missing/expired."""
     from redis.asyncio import Redis
     from redis.exceptions import RedisError
@@ -100,7 +101,7 @@ async def peek(redis, token: str) -> ClaimPeek | None:
         return None
 
 
-async def burn(redis, token: str) -> tuple[str, str] | None:
+async def burn(redis: Any, token: str) -> tuple[str, str] | None:
     """Atomically consume the claim. Returns ``(client_name, raw_key)`` or None."""
     from redis.asyncio import Redis
     from redis.exceptions import RedisError

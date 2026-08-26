@@ -27,7 +27,14 @@ from sqlalchemy.orm import selectinload
 from app.config import Settings, get_settings
 from app.core.encryption import EncryptionError, encrypt
 from app.core.voice_engine import VoiceEngineClient, VoiceEngineError
-from app.db.models import AgentDriftEvent, Batch, Call, CallAnalysis, Client, ClientAgentConfig
+from app.db.models import (
+    AgentDriftEvent,
+    Batch,
+    Call,
+    CallAnalysis,
+    Client,
+    ClientApiKey,
+)
 from app.db.session import get_session
 from app.dependencies import get_redis, get_voice_engine
 from app.schemas.admin import (
@@ -82,29 +89,32 @@ async def _get_client_or_404(session: AsyncSession, client_id: uuid.UUID) -> Cli
 async def create_client(
     body: CreateClientRequest,
     session: AsyncSession = Depends(get_session),
-) -> Client:
+) -> ClientSummary:
     try:
-        return await tenants.admin_create_client(
+        client = await tenants.admin_create_client(
             session, name=body.name, contact_email=body.contact_email, status=body.status
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail={"error": "conflict", "message": str(exc)})
+    return ClientSummary.model_validate(client, from_attributes=True)
 
 
 @router.get("/clients", response_model=list[ClientSummary])
 async def list_clients(
     status: str | None = None,
     session: AsyncSession = Depends(get_session),
-) -> list[Client]:
-    return await tenants.list_clients(session, status=status)
+) -> list[ClientSummary]:
+    clients = await tenants.list_clients(session, status=status)
+    return [ClientSummary.model_validate(c, from_attributes=True) for c in clients]
 
 
 @router.get("/clients/{client_id}", response_model=ClientSummary)
 async def get_client(
     client_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-) -> Client:
-    return await _get_client_or_404(session, client_id)
+) -> ClientSummary:
+    client = await _get_client_or_404(session, client_id)
+    return ClientSummary.model_validate(client, from_attributes=True)
 
 
 @router.patch("/clients/{client_id}", response_model=ClientSummary)
@@ -112,11 +122,11 @@ async def update_client(
     client_id: uuid.UUID,
     body: UpdateClientRequest,
     session: AsyncSession = Depends(get_session),
-) -> Client:
+) -> ClientSummary:
     client = await _get_client_or_404(session, client_id)
     fields = body.model_dump(exclude_unset=True)
     try:
-        return await tenants.update_client(
+        updated = await tenants.update_client(
             session,
             client,
             name=fields.get("name"),
@@ -125,6 +135,7 @@ async def update_client(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail={"error": "conflict", "message": str(exc)})
+    return ClientSummary.model_validate(updated, from_attributes=True)
 
 
 @router.delete("/clients/{client_id}", status_code=204)
@@ -141,7 +152,7 @@ async def approve_client(
     client_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     redis=Depends(get_redis),
-    settings=Depends(lambda: __import__("app.config", fromlist=["get_settings"]).get_settings()),
+    settings: Settings = Depends(get_settings),
 ) -> ApproveResponse:
     client = await _get_client_or_404(session, client_id)
     if client.status not in {"pending", "rejected"}:
@@ -183,27 +194,30 @@ async def approve_client(
 async def reject_client(
     client_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-) -> Client:
+) -> ClientSummary:
     client = await _get_client_or_404(session, client_id)
-    return await tenants.reject_client(client)
+    rejected = await tenants.reject_client(client)
+    return ClientSummary.model_validate(rejected, from_attributes=True)
 
 
 @router.post("/clients/{client_id}/suspend", response_model=ClientSummary)
 async def suspend_client(
     client_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-) -> Client:
+) -> ClientSummary:
     client = await _get_client_or_404(session, client_id)
-    return await tenants.suspend_client(client)
+    suspended = await tenants.suspend_client(client)
+    return ClientSummary.model_validate(suspended, from_attributes=True)
 
 
 @router.post("/clients/{client_id}/reactivate", response_model=ClientSummary)
 async def reactivate_client(
     client_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-) -> Client:
+) -> ClientSummary:
     client = await _get_client_or_404(session, client_id)
-    return await tenants.reactivate_client(client)
+    reactivated = await tenants.reactivate_client(client)
+    return ClientSummary.model_validate(reactivated, from_attributes=True)
 
 
 # ── API keys ──────────────────────────────────────────────────────────────────
@@ -212,7 +226,7 @@ async def reactivate_client(
 async def list_keys(
     client_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-) -> list:
+) -> list[ClientApiKey]:
     await _get_client_or_404(session, client_id)
     return await tenants.list_keys(session, client_id)
 
@@ -292,9 +306,13 @@ async def update_config(
 
     # Separate the write-only API key from the rest — it needs encryption before storage.
     fields = body.model_dump(exclude_unset=True)
+    # Test membership before popping: `pop(..., None)` cannot distinguish "field
+    # omitted" from "explicitly sent as null", and this endpoint documents that
+    # an explicit null clears the column (as it does for every other field).
+    api_key_supplied = "analysis_llm_api_key" in fields
     raw_api_key: str | None = fields.pop("analysis_llm_api_key", None)
 
-    if raw_api_key is not None:
+    if api_key_supplied:
         if not settings.encryption_key:
             raise HTTPException(
                 status_code=503,
@@ -304,7 +322,7 @@ async def update_config(
                     "Cannot store per-client API keys.",
                 },
             )
-        if raw_api_key == "":
+        if raw_api_key is None or raw_api_key == "":
             fields["analysis_llm_api_key_enc"] = None  # explicit clear
         else:
             try:
@@ -324,13 +342,22 @@ async def update_config(
 @router.get("/clients/{client_id}/batches", response_model=list[BatchSummaryAdmin])
 async def admin_list_client_batches(
     client_id: uuid.UUID,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=200, ge=1, le=200),
     session: AsyncSession = Depends(get_session),
 ) -> list[BatchSummaryAdmin]:
+    """List a client's batches, newest first.
+
+    ``page_size`` defaults to 200 — the previous hardcoded cap — so a caller
+    passing no params gets exactly what it got before. Paging makes rows beyond
+    the first 200 reachable, which the fixed cap silently hid.
+    """
     result = await session.execute(
         select(Batch)
         .where(Batch.client_id == client_id)
         .order_by(Batch.created_at.desc())
-        .limit(200)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
     return [
         BatchSummaryAdmin(
@@ -437,7 +464,7 @@ async def list_catalog_agents(
 async def get_agent_variables_admin(
     agent_id: str,
     voice_engine: VoiceEngineClient = Depends(get_voice_engine),
-    settings=Depends(lambda: __import__("app.config", fromlist=["get_settings"]).get_settings()),
+    settings: Settings = Depends(get_settings),
     session: AsyncSession = Depends(get_session),
 ) -> AgentVariables:
     """Admin-scoped variables endpoint — uses X-Admin-Key, not X-API-Key."""
@@ -662,6 +689,13 @@ def _admin_call_analysis(analysis: CallAnalysis | None) -> CallAnalysisResult | 
 
 
 async def _admin_from_number(session: AsyncSession, call: Call) -> str | None:
+    """Resolve a single call's from_number.
+
+    Only used by the single-call detail route, where one extra lookup is not an
+    N+1. List routes must eager-load ``Call.batch`` instead — and must, because
+    the detail route's loader does not populate the relationship, so touching
+    ``call.batch`` there would lazy-load and raise MissingGreenlet under async.
+    """
     if call.batch_id is None:
         return None
     batch = await session.get(Batch, call.batch_id)
@@ -705,7 +739,9 @@ async def admin_list_client_calls(
     needs_analysis_join = bool(outcome or urgency)
 
     count_query = select(func.count()).select_from(Call)
-    page_query = select(Call).options(selectinload(Call.analysis))
+    # Eager-load `batch` alongside `analysis`: this listing pages up to 200 rows
+    # and previously resolved from_number with one extra query per row (N+1).
+    page_query = select(Call).options(selectinload(Call.analysis), selectinload(Call.batch))
     if needs_analysis_join:
         count_query = count_query.join(CallAnalysis, CallAnalysis.call_id == Call.id)
         page_query = page_query.join(CallAnalysis, CallAnalysis.call_id == Call.id)
@@ -728,7 +764,7 @@ async def admin_list_client_calls(
             agent_id=call.agent_id,
             batch_id=call.batch_id,
             contact_number=call.contact_number,
-            from_number=await _admin_from_number(session, call),
+            from_number=call.batch.from_number if call.batch else None,
             status=call.status,
             duration=call.duration,
             cost=call.cost,

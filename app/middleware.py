@@ -10,6 +10,7 @@ Ordering (outermost -> innermost, see app/main.py):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -25,6 +26,9 @@ logger = logging.getLogger("turing.requests")
 
 # Paths that are noise in an audit log.
 _SKIP_PREFIXES = ("/docs", "/redoc", "/openapi.json", "/favicon")
+
+# Strong references to in-flight request_logs writes; see RequestContextMiddleware.
+_background_tasks: set[asyncio.Task[None]] = set()
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -42,8 +46,15 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path
         if not path.startswith(_SKIP_PREFIXES):
-            import asyncio
-            asyncio.create_task(self._record(request, response.status_code, latency_ms, request_id))
+            # The loop keeps only a weak reference to a bare create_task, so the
+            # task can be garbage-collected before it runs and the request_logs
+            # insert vanishes with no error anywhere. Hold a strong reference
+            # until it completes.
+            task = asyncio.create_task(
+                self._record(request, response.status_code, latency_ms, request_id)
+            )
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
         return response
 
     async def _record(self, request: Request, status_code: int,
@@ -77,7 +88,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 # The only unauthenticated paths. Everything else is denied by default.
 _OPEN_PATHS = frozenset({
     "/health", "/health/ready", "/docs", "/redoc", "/openapi.json",
-    "/v1/register", "/webhooks/voice",
+    "/v1/register", "/webhooks/voice", "/v1/portal/lookup",
 })
 # Prefix-matched open paths (startswith check — covers dynamic segments).
 # /v1/claim/{token}: open so clients can reveal their key without an API key.

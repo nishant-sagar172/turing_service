@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from app.db.models import CallAnalysis
 
 
 class CallAnalysisResult(BaseModel):
@@ -19,6 +22,22 @@ class CallAnalysisResult(BaseModel):
     symptoms_reported: list[str] | None = None
     model_used: str | None
     analyzed_at: datetime | None
+
+    @classmethod
+    def from_model(cls, analysis: "CallAnalysis | None") -> "CallAnalysisResult | None":
+        if analysis is None:
+            return None
+        return cls(
+            outcome=analysis.outcome,
+            summary=analysis.summary,
+            reason=analysis.reason,
+            requests=analysis.requests or [],
+            urgency=analysis.urgency,
+            confidence=analysis.confidence,
+            symptoms_reported=analysis.symptoms_reported or [],
+            model_used=analysis.model_used,
+            analyzed_at=analysis.analyzed_at,
+        )
 
 
 class CallListItem(BaseModel):

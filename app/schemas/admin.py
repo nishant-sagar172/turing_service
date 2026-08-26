@@ -9,18 +9,18 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 
 class CreateClientRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
-    contact_email: str | None = None
+    contact_email: EmailStr | None = Field(default=None)
     status: str = Field(default="pending", pattern=r"^(pending|active)$")
 
 
 class UpdateClientRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
-    contact_email: str | None = None
+    contact_email: EmailStr | None = Field(default=None)
 
     @field_validator("contact_email", mode="before")
     @classmethod
     def allow_empty_email(cls, v: object) -> object:
-        # empty string clears the field
+        # empty string clears the field; non-empty is validated by EmailStr
         return None if v == "" else v
 
 
@@ -52,7 +52,7 @@ class KeySummary(BaseModel):
 
 
 class IssueKeyRequest(BaseModel):
-    label: str | None = None
+    label: str | None = Field(default=None, max_length=128)
 
 
 class IssueKeyResponse(BaseModel):
@@ -63,7 +63,7 @@ class IssueKeyResponse(BaseModel):
 class ClientConfigUpdate(BaseModel):
     default_from_number: str | None = None
     webhook_url: str | None = None
-    webhook_secret: str | None = None
+    webhook_secret: str | None = Field(default=None, max_length=128)
     visible_fields: dict[str, Any] | None = None
     settings: dict[str, Any] | None = None
     # LLM analysis overrides — pass null to clear, omit to leave unchanged
@@ -126,6 +126,14 @@ class BatchSummaryAdmin(BaseModel):
     total_count: int
     scheduled_at: str | None
     created_at: datetime
+
+
+class BatchListResponseAdmin(BaseModel):
+    items: list[BatchSummaryAdmin]
+    total: int
+    page: int
+    page_size: int
+    pages: int
 
 
 class PhoneNumberCatalogSummary(BaseModel):

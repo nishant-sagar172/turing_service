@@ -51,8 +51,8 @@ def _base_filters(
     date_to: datetime | None,
     agent_id: str | None,
     batch_id: uuid.UUID | None,
-) -> list:
-    filters: list = [Call.client_id == client_id]
+) -> list[Any]:
+    filters: list[Any] = [Call.client_id == client_id]
     if date_from:
         filters.append(Call.created_at >= date_from)
     if date_to:
@@ -100,7 +100,7 @@ def _outcome_breakdown(outcome_counts: dict[str, int], terminal: int) -> Outcome
 
 
 async def _fetch_volume_duration_cost(
-    session: AsyncSession, filters: list
+    session: AsyncSession, filters: list[Any]
 ) -> dict[str, Any]:
     connected_expr = case((Call.status.in_(CONNECTED), 1), else_=0)
     not_connected_expr = case((Call.status.in_(NOT_CONNECTED), 1), else_=0)
@@ -146,7 +146,7 @@ async def _fetch_volume_duration_cost(
 
 
 async def _fetch_outcome_counts(
-    session: AsyncSession, filters: list
+    session: AsyncSession, filters: list[Any]
 ) -> dict[str, int]:
     rows = await session.execute(
         select(CallAnalysis.outcome, func.count().label("cnt"))
@@ -158,7 +158,7 @@ async def _fetch_outcome_counts(
 
 
 async def _fetch_not_connected_breakdown(
-    session: AsyncSession, filters: list
+    session: AsyncSession, filters: list[Any]
 ) -> dict[str, int]:
     rows = await session.execute(
         select(Call.status, func.count().label("cnt"))
@@ -261,7 +261,7 @@ async def get_by_agent(
             func.percentile_cont(0.9).within_group(Call.duration.asc()).label("p90"),
         ).where(*base, Call.duration.isnot(None)).group_by(Call.agent_id)
     )).all()
-    pct_by_agent: dict[str, tuple] = {r.agent_id: (r.p50, r.p90) for r in pct_rows}
+    pct_by_agent: dict[str, tuple[Any, Any]] = {r.agent_id: (r.p50, r.p90) for r in pct_rows}
 
     outcome_rows = (await session.execute(
         select(Call.agent_id, CallAnalysis.outcome, func.count().label("cnt"))
@@ -308,7 +308,7 @@ async def get_by_batch(
     agent_id: str | None = None,
 ) -> list[BatchStats]:
     base = _base_filters(client_id, date_from, date_to, agent_id, None)
-    base_with_batch = [*base, Call.batch_id.isnot(None)]
+    base_with_batch: list[Any] = [*base, Call.batch_id.isnot(None)]
 
     connected_expr = case((Call.status.in_(CONNECTED), 1), else_=0)
     not_connected_expr = case((Call.status.in_(NOT_CONNECTED), 1), else_=0)
@@ -351,7 +351,7 @@ async def get_by_batch(
         ).where(*base_with_batch, Call.duration.isnot(None), Call.batch_id.in_(batch_pks))
         .group_by(Call.batch_id)
     )).all()
-    pct_by_batch: dict[uuid.UUID, tuple] = {r.batch_id: (r.p50, r.p90) for r in pct_rows}
+    pct_by_batch: dict[uuid.UUID, tuple[Any, Any]] = {r.batch_id: (r.p50, r.p90) for r in pct_rows}
 
     outcome_rows = (await session.execute(
         select(Call.batch_id, CallAnalysis.outcome, func.count().label("cnt"))

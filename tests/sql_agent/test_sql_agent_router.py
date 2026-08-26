@@ -40,7 +40,7 @@ def test_sql_agent_router_returns_handled_status(monkeypatch) -> None:
         sql_agent_explain_validation=False,
     )
 
-    async def fake_build_query(*args, **kwargs) -> BuildQueryResponse:
+    async def fake_build_query(*_args, **_kwargs) -> BuildQueryResponse:
         return BuildQueryResponse(
             status="built",
             sql="SELECT id FROM patients LIMIT 200",
@@ -78,7 +78,7 @@ def test_sql_agent_route_accepts_valid_api_key(monkeypatch) -> None:
         assert raw_key == "tk_test"
         return tenant
 
-    async def fake_build_query(*args, **kwargs) -> BuildQueryResponse:
+    async def fake_build_query(*_args, **kwargs) -> BuildQueryResponse:
         assert kwargs["audit_client_id"] == tenant.client_id
         return BuildQueryResponse(status="blocked", reason="write_intent")
 
@@ -104,7 +104,7 @@ def test_calling_service_can_build_sql_through_endpoint(monkeypatch) -> None:
         assert raw_key == "tk_service_key"
         return tenant
 
-    async def fake_build_query(question, *, workspace, settings, audit_client_id):
+    async def fake_build_query(question, *, workspace, settings, audit_client_id):  # noqa: ARG001
         seen["question"] = question
         seen["workspace"] = workspace
         seen["audit_client_id"] = audit_client_id

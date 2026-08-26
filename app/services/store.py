@@ -14,18 +14,26 @@ else can be scoped).
 
 from __future__ import annotations
 
+import logging
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.call_status import CONNECTED_STATUSES as _SUCCESS_STATUSES
+from app.core.call_status import TERMINAL_STATUSES
 from app.db.models import Batch, Call
+
+logger = logging.getLogger("turing.store")
 
 
 def _telephony(payload: dict[str, Any]) -> dict[str, Any]:
     data = payload.get("telephony_data")
-    return data if isinstance(data, dict) else {}
+    if isinstance(data, dict):
+        return cast(dict[str, Any], data)
+    return {}
 
 
 def extract_contact_number(payload: dict[str, Any]) -> str | None:
@@ -40,37 +48,101 @@ def extract_contact_number(payload: dict[str, Any]) -> str | None:
 def extract_patient_ref(payload: dict[str, Any]) -> str | None:
     ctx = payload.get("context_details")
     if isinstance(ctx, dict):
-        recipient = ctx.get("recipient_data")
+        ctx_d = cast(dict[str, Any], ctx)
+        recipient = ctx_d.get("recipient_data")
         if isinstance(recipient, dict):
-            ref = recipient.get("patient_uhid")
+            ref = cast(dict[str, Any], recipient).get("patient_uhid")
             return str(ref) if ref is not None else None
     return None
 
 
 def extract_voice_batch_id(payload: dict[str, Any]) -> str | None:
     batch_run = payload.get("batch_run_details")
-    if isinstance(batch_run, dict) and batch_run.get("batch_id"):
-        return str(batch_run["batch_id"])
+    if isinstance(batch_run, dict):
+        br = cast(dict[str, Any], batch_run)
+        if br.get("batch_id"):
+            return str(br["batch_id"])
     if payload.get("batch_id"):
         return str(payload["batch_id"])
     return None
 
 
+def _coerce_cost(payload: dict[str, Any]) -> float | None:
+    """Convert the upstream ``total_cost`` (minor units) to a major-unit float.
+
+    The payload is untrusted vendor input, so the type is checked rather than
+    assumed: a string or other non-numeric value must not raise, because this
+    mapping runs per-item inside the reconcile loop and one malformed record
+    would otherwise abort every remaining call in the pass. ``bool`` is
+    rejected explicitly — it is an ``int`` subclass, so ``True / 100`` would
+    silently record a cost of 0.01.
+    """
+    raw = payload.get("total_cost")
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        logger.warning(
+            "ignoring non-numeric total_cost %r (%s) for execution %s",
+            raw,
+            type(raw).__name__,
+            payload.get("id"),
+        )
+        return None
+    return raw / 100
+
+
 def _call_fields_from_execution(payload: dict[str, Any]) -> dict[str, Any]:
     tel = _telephony(payload)
     batch_run = payload.get("batch_run_details")
-    retry_count = batch_run.get("retry_count") if isinstance(batch_run, dict) else None
+    batch_run_d = cast(dict[str, Any], batch_run) if isinstance(batch_run, dict) else None
+    retry_count = batch_run_d.get("retry_count") if batch_run_d is not None else None
+    cost = _coerce_cost(payload)
     return {
         "status": payload.get("status") or "pending",
         "transcript": payload.get("transcript"),
         "recording_url": tel.get("recording_url"),
         "extracted_data": payload.get("extracted_data"),
-        "cost": payload["total_cost"] / 100 if payload.get("total_cost") is not None else None,
+        "cost": cost,
+        # Dual-write integer minor units (B-10). `cost` stays authoritative
+        # until analytics readers migrate off the float column.
+        "cost_cents": None if cost is None else round(cost * 100),
         "duration": payload.get("conversation_duration") or tel.get("duration"),
         "hangup_reason": tel.get("hangup_reason") or tel.get("hangup_by"),
         "retry_count": retry_count,
         "raw_payload": payload,
     }
+
+
+async def record_call(
+    session: AsyncSession,
+    *,
+    client_id: uuid.UUID,
+    agent_id: str,
+    voice_call_id: str,
+    contact_number: str | None,
+    status: str = "queued",
+) -> Call:
+    """Seed an initial Call row for a single (non-batch) outbound call.
+
+    Idempotent: DO NOTHING on the unique constraint, then re-read so a webhook
+    that races the placement response doesn't lose its update.
+    """
+    await session.execute(
+        pg_insert(Call)
+        .values(
+            client_id=client_id,
+            agent_id=agent_id,
+            voice_call_id=voice_call_id,
+            contact_number=contact_number,
+            status=status,
+        )
+        .on_conflict_do_nothing(constraint="uq_call_client_voice_id")
+    )
+    call = await get_call_by_voice_id(session, client_id, voice_call_id)
+    if call is None:
+        logger.warning("call row for execution %s not visible after insert", voice_call_id)
+        raise RuntimeError(f"Call row for {voice_call_id} not visible after insert")
+    return call
 
 
 async def record_batch(
@@ -174,15 +246,34 @@ async def upsert_call_from_execution(
                 resolved_client_id = batch.client_id
         if resolved_client_id is None:
             return None
-        call = Call(
-            client_id=resolved_client_id,
-            voice_call_id=execution_id,
-            batch_id=batch.id if batch else None,
-            agent_id=str(payload.get("agent_id") or (batch.agent_id if batch else "")),
-            contact_number=extract_contact_number(payload),
-            patient_ref=extract_patient_ref(payload),
+
+        # Insert-or-nothing, then re-read. Two concurrent deliveries for the same
+        # execution (a webhook retry racing the reconcile poll) would both see
+        # None above and both INSERT; the loser's IntegrityError would propagate
+        # and abort every remaining item in the enclosing reconcile loop.
+        #
+        # DO NOTHING rather than DO UPDATE on purpose: the field updates below
+        # already skip None values, so a sparse later payload cannot null out
+        # columns an earlier richer one populated. A DO UPDATE SET built from the
+        # raw payload would lose that protection.
+        await session.execute(
+            pg_insert(Call)
+            .values(
+                client_id=resolved_client_id,
+                voice_call_id=execution_id,
+                batch_id=batch.id if batch else None,
+                agent_id=str(payload.get("agent_id") or (batch.agent_id if batch else "")),
+                contact_number=extract_contact_number(payload),
+                patient_ref=extract_patient_ref(payload),
+            )
+            .on_conflict_do_nothing(constraint="uq_call_client_voice_id")
         )
-        session.add(call)
+        call = await get_call_by_voice_id_global(session, execution_id)
+        if call is None:
+            # Lost the race and the winner's row is not visible in this
+            # transaction — safe to skip; the next reconcile pass will update it.
+            logger.warning("call row for execution %s not visible after upsert", execution_id)
+            return None
 
     for field, value in _call_fields_from_execution(payload).items():
         if value is not None:
@@ -194,13 +285,6 @@ async def upsert_call_from_execution(
 
     await session.flush()
     return call
-
-
-_SUCCESS_STATUSES = {"completed"}
-TERMINAL_STATUSES = {
-    "completed", "no-answer", "busy", "failed", "canceled", "cancelled",
-    "stopped", "error", "balance-low",
-}
 
 
 async def batch_metrics(session: AsyncSession, batch: Batch) -> dict[str, Any]:

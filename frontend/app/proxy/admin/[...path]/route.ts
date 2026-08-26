@@ -1,6 +1,10 @@
 // Server-side admin proxy — injects X-Admin-Key from a server-only env var.
 // The browser NEVER holds the admin key.
 // Returns 404 when TURING_ADMIN_KEY is unset, making a public deploy safe.
+// Also requires a valid signed operator session cookie — this is the real
+// security boundary (middleware only does a cheap presence check on the edge).
+
+import { hasValidOperatorSession } from "../../../../lib/operatorSession";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +14,13 @@ const API_URL = process.env.TURING_API_URL ?? "http://localhost:8005";
 async function handle(req: Request, { params }: { params: { path: string[] } }) {
   if (!ADMIN_KEY) {
     return new Response("Not found", { status: 404 });
+  }
+
+  if (!hasValidOperatorSession()) {
+    return new Response(JSON.stringify({ detail: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const path = params.path.join("/");

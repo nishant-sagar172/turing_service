@@ -12,10 +12,38 @@ description in the prompt.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
+
+# Retry budget for transient LLM provider failures.
+_MAX_ANALYSIS_ATTEMPTS = 3
+_ANALYSIS_BACKOFF_S = 1.0
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Whether an LLM provider error is worth another attempt.
+
+    Both provider SDKs are imported lazily inside their call helpers, so their
+    exception classes are matched structurally rather than by import: a 429 or
+    5xx is transient, any other 4xx (bad key, malformed request) is permanent
+    and must fail fast.
+    """
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status == 429 or status >= 500
+    # Connection/timeout failures carry no status code.
+    return type(exc).__name__ in {
+        "APIConnectionError",
+        "APITimeoutError",
+        "APIConnectionTimeoutError",
+        "ConnectError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "TimeoutException",
+    }
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,7 +104,7 @@ Also assess for every call:
   escalation.
 """
 
-_TOOL_SCHEMA: dict[str, Any] = {
+_TOOL_SCHEMA: Any = {
     "name": "classify_call",
     "description": "Classify a call outcome and generate structured analysis.",
     "input_schema": {
@@ -232,13 +260,33 @@ async def analyze_call(
 
     user_content = _build_user_content(call)
 
-    try:
-        if provider == "anthropic":
-            result = await _call_anthropic(api_key, model, system, user_content)
-        else:
-            result = await _call_openai(api_key, model, system, user_content)
-    except Exception:
-        logger.exception("LLM analysis failed for call %s", call.id)
+    # Bounded retry: analysis runs exactly once per terminal transition and
+    # nothing re-triggers it, so swallowing a transient rate-limit or 5xx left
+    # the call permanently unanalysed — on a healthcare classifier that flags
+    # escalations, silently losing exactly the calls that hit a blip.
+    result: dict[str, Any] | None = None
+    for attempt in range(_MAX_ANALYSIS_ATTEMPTS):
+        try:
+            if provider == "anthropic":
+                result = await _call_anthropic(api_key, model, system, user_content)
+            else:
+                result = await _call_openai(api_key, model, system, user_content)
+            break
+        except Exception as exc:
+            is_last = attempt + 1 >= _MAX_ANALYSIS_ATTEMPTS
+            if not _is_retryable(exc) or is_last:
+                logger.exception(
+                    "LLM analysis failed for call %s (attempt %d/%d, retryable=%s)",
+                    call.id, attempt + 1, _MAX_ANALYSIS_ATTEMPTS, _is_retryable(exc),
+                )
+                return None
+            logger.warning(
+                "LLM analysis attempt %d/%d for call %s failed (%s); retrying",
+                attempt + 1, _MAX_ANALYSIS_ATTEMPTS, call.id, type(exc).__name__,
+            )
+            await asyncio.sleep(_ANALYSIS_BACKOFF_S * (2**attempt))
+
+    if result is None:  # defensive: loop always breaks or returns
         return None
 
     outcome = result.get("outcome", "other")
@@ -322,3 +370,41 @@ async def classify_by_status(
     await session.flush()
     logger.info("Call %s auto-classified: status=%s outcome=%s", call.id, call.status, outcome)
     return analysis
+
+
+async def run_analysis_for_call(call_id: str, settings: Settings) -> None:
+    """Analyse one call in its own session. Never raises.
+
+    Completed calls with a transcript go to the LLM classifier; every other
+    terminal status (including completed-without-transcript) goes to the
+    status-based auto-classifier. Idempotent: returns early when an analysis row
+    already exists.
+
+    Lives in the service layer so both the webhook receiver and the batch
+    reconcile path can schedule it without a service importing from a router.
+    """
+    import uuid as _uuid
+
+    from app.core.call_status import CONNECTED_STATUSES
+    from app.db.session import get_session_factory
+    from app.services.tenants import get_config
+
+    try:
+        async with get_session_factory()() as session:
+            call = await session.get(Call, _uuid.UUID(call_id))
+            if call is None:
+                return
+            existing = await session.execute(
+                select(CallAnalysis).where(CallAnalysis.call_id == call.id)
+            )
+            if existing.scalar_one_or_none() is not None:
+                return  # already analysed
+
+            if call.status in CONNECTED_STATUSES and call.transcript:
+                client_config = await get_config(session, call.client_id)
+                await analyze_call(session, call, settings, client_config)
+            else:
+                await classify_by_status(session, call)
+            await session.commit()
+    except Exception:
+        logger.exception("Background analysis failed for call_id=%s", call_id)

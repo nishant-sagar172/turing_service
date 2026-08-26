@@ -15,7 +15,7 @@ envelope ``{error, message, detail, request_id}`` (see app/errors.py).
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -36,8 +36,8 @@ from app.routers import (
     health,
     me,
     phone_numbers,
+    portal,
     register,
-    sql_agent,
     webhooks,
 )
 from app.services.agent_sync import sync_catalog
@@ -59,7 +59,7 @@ async def _sync_loop(app: FastAPI, interval_minutes: float) -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level.upper())
     logger.info(
@@ -121,6 +121,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(webhooks.router)
     app.include_router(register.router, prefix="/v1")
+    app.include_router(portal.router, prefix="/v1")
     app.include_router(claim.router, prefix="/v1")
     app.include_router(admin.router, prefix="/v1")
     app.include_router(me.router, prefix="/v1")
@@ -130,7 +131,13 @@ def create_app() -> FastAPI:
     app.include_router(batches.router, prefix="/v1")
     app.include_router(phone_numbers.router, prefix="/v1")
     app.include_router(agents.router, prefix="/v1")
-    app.include_router(sql_agent.router, prefix="/v1")
+
+    try:
+        from app.routers import sql_agent
+        app.include_router(sql_agent.router, prefix="/v1")
+    except Exception:
+        logger.info("SQL Builder Agent disabled (dependencies not configured)")
+
 
     return app
 

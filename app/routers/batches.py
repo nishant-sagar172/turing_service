@@ -267,15 +267,22 @@ async def list_batches(
 @router.get("/by-agent/{agent_id}", response_model=list[BatchSummary])
 async def list_agent_batches(
     agent_id: str,
+    limit: int = Query(default=200, ge=1, le=500),
     tenant: TenantContext = Depends(get_current_tenant),
     session: AsyncSession = Depends(get_session),
 ) -> list[BatchSummary]:
     """Reads turing's own records, filtered by tenant — never the live voice
     engine, which has no notion of tenants and would leak other clients'
-    batches for the same agent."""
+    batches for the same agent.
+
+    ``limit`` defaults to 200, matching the sibling batch listing. This query
+    was previously unbounded, so a long-running agent returned its entire
+    history in one response.
+    """
     result = await session.execute(
         select(Batch).where(Batch.client_id == tenant.client_id, Batch.agent_id == agent_id)
         .order_by(Batch.created_at.desc())
+        .limit(limit)
     )
     batches = result.scalars().all()
     return [
