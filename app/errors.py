@@ -8,13 +8,15 @@ own ``error`` key, e.g. variable-validation 422s) are preserved in ``detail``.
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.core.bolna_client import BolnaError
+from app.core.voice_engine import VoiceEngineError
+from app.sql_agent.llm import LLMError
 
 logger = logging.getLogger("turing.errors")
 
@@ -24,7 +26,7 @@ def _rid(request: Request) -> str | None:
 
 
 def envelope(request: Request, status_code: int, error: str, message: str,
-             detail=None) -> JSONResponse:
+             detail: Any = None) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={
@@ -37,13 +39,23 @@ def envelope(request: Request, status_code: int, error: str, message: str,
 
 
 def register_error_handlers(app: FastAPI) -> None:
-    @app.exception_handler(BolnaError)
-    async def _bolna_error(request: Request, exc: BolnaError) -> JSONResponse:
+    @app.exception_handler(LLMError)
+    async def _llm_error(request: Request, exc: LLMError) -> JSONResponse:
+        return envelope(
+            request,
+            status_code=502,
+            error="llm_error",
+            message=str(exc),
+            detail={"provider": exc.provider},
+        )
+
+    @app.exception_handler(VoiceEngineError)
+    async def _voice_engine_error(request: Request, exc: VoiceEngineError) -> JSONResponse:
         # Upstream status passes through; transport failure -> 502.
         return envelope(
             request,
             status_code=exc.status_code or 502,
-            error="bolna_error",
+            error="voice_engine_error",
             message=str(exc),
             detail=exc.payload,
         )
@@ -53,11 +65,12 @@ def register_error_handlers(app: FastAPI) -> None:
         detail = exc.detail
         if isinstance(detail, dict) and "error" in detail:
             # Structured error raised by our own code (e.g. missing variables).
+            d = cast(dict[str, Any], detail)
             return envelope(
                 request,
                 status_code=exc.status_code,
-                error=str(detail.get("error")),
-                message=str(detail.get("message") or detail.get("error")),
+                error=str(d.get("error")),
+                message=str(d.get("message") or d.get("error")),
                 detail=detail,
             )
         return envelope(
@@ -80,7 +93,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
-        logger.exception("Unhandled error (request_id=%s)", _rid(request))
+        logger.error("Unhandled error (request_id=%s)", _rid(request), exc_info=exc)
         return envelope(
             request,
             status_code=500,

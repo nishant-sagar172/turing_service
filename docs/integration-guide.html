@@ -1,0 +1,1482 @@
+<title>Turing Service — API Integration Guide</title>
+<style>
+  :root {
+    --color-bg: #ffffff;
+    --color-text: #1a1a2e;
+    --color-text-secondary: #4a4a6a;
+    --color-primary: #2563eb;
+    --color-primary-light: #eff6ff;
+    --color-border: #e2e8f0;
+    --color-border-light: #f1f5f9;
+    --color-code-bg: #f8fafc;
+    --color-success: #059669;
+    --color-warning: #d97706;
+    --color-danger: #dc2626;
+    --color-info: #0891b2;
+    --color-get: #059669;
+    --color-post: #2563eb;
+    --color-put: #7c3aed;
+    --color-patch: #d97706;
+    --color-delete: #dc2626;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+    --radius: 8px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --color-bg: #0f172a;
+      --color-text: #e2e8f0;
+      --color-text-secondary: #94a3b8;
+      --color-primary: #60a5fa;
+      --color-primary-light: #1e293b;
+      --color-border: #334155;
+      --color-border-light: #1e293b;
+      --color-code-bg: #1e293b;
+      --color-success: #34d399;
+      --color-warning: #fbbf24;
+      --color-danger: #f87171;
+      --color-info: #22d3ee;
+      --color-get: #34d399;
+      --color-post: #60a5fa;
+      --color-put: #a78bfa;
+      --color-patch: #fbbf24;
+      --color-delete: #f87171;
+    }
+  }
+  :root[data-theme="dark"] {
+    --color-bg: #0f172a;
+    --color-text: #e2e8f0;
+    --color-text-secondary: #94a3b8;
+    --color-primary: #60a5fa;
+    --color-primary-light: #1e293b;
+    --color-border: #334155;
+    --color-border-light: #1e293b;
+    --color-code-bg: #1e293b;
+    --color-success: #34d399;
+    --color-warning: #fbbf24;
+    --color-danger: #f87171;
+    --color-info: #22d3ee;
+    --color-get: #34d399;
+    --color-post: #60a5fa;
+    --color-put: #a78bfa;
+    --color-patch: #fbbf24;
+    --color-delete: #f87171;
+  }
+
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-sans);
+    color: var(--color-text);
+    background: var(--color-bg);
+    line-height: 1.7;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 32px;
+  }
+
+  /* ── Cover ── */
+  .cover {
+    padding: 80px 0 60px;
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: 48px;
+  }
+  .cover-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-primary);
+    background: var(--color-primary-light);
+    padding: 4px 12px;
+    border-radius: 100px;
+    margin-bottom: 20px;
+  }
+  .cover h1 {
+    font-size: 42px;
+    font-weight: 800;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin-bottom: 12px;
+  }
+  .cover .subtitle {
+    font-size: 18px;
+    color: var(--color-text-secondary);
+    margin-bottom: 24px;
+  }
+  .cover-meta {
+    display: flex;
+    gap: 24px;
+    font-size: 13px;
+    color: var(--color-text-secondary);
+  }
+  .cover-meta span { display: flex; align-items: center; gap: 6px; }
+
+  /* ── TOC ── */
+  .toc {
+    background: var(--color-primary-light);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 28px 32px;
+    margin-bottom: 56px;
+  }
+  .toc h2 {
+    font-size: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-secondary);
+    margin-bottom: 16px;
+  }
+  .toc ol {
+    list-style: none;
+    counter-reset: toc-counter;
+    columns: 2;
+    column-gap: 40px;
+  }
+  .toc li {
+    counter-increment: toc-counter;
+    margin-bottom: 8px;
+    break-inside: avoid;
+  }
+  .toc li::before {
+    content: counter(toc-counter, decimal-leading-zero) ".";
+    font-weight: 600;
+    color: var(--color-primary);
+    margin-right: 8px;
+    font-size: 13px;
+    font-family: var(--font-mono);
+  }
+  .toc a {
+    color: var(--color-text);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 14px;
+  }
+  .toc a:hover { color: var(--color-primary); }
+
+  /* ── Sections ── */
+  section { margin-bottom: 56px; }
+  section > h2 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: 8px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--color-primary);
+    display: inline-block;
+  }
+  section > h2 + p { margin-top: 12px; }
+  section h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 32px;
+    margin-bottom: 10px;
+  }
+  section h4 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-top: 24px;
+    margin-bottom: 8px;
+    color: var(--color-text-secondary);
+  }
+  p { margin-bottom: 14px; }
+
+  /* ── Code blocks ── */
+  pre {
+    background: var(--color-code-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+    margin: 12px 0 18px;
+  }
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: var(--color-code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  pre code { background: none; padding: 0; }
+
+  /* ── Tables ── */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 12px 0 20px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  thead { background: var(--color-primary-light); }
+  th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-secondary);
+    padding: 10px 16px;
+    border-bottom: 2px solid var(--color-border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--color-border-light);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+
+  /* ── Method badges ── */
+  .method {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    min-width: 56px;
+    text-align: center;
+  }
+  .method-get    { background: color-mix(in srgb, var(--color-get) 15%, transparent); color: var(--color-get); }
+  .method-post   { background: color-mix(in srgb, var(--color-post) 15%, transparent); color: var(--color-post); }
+  .method-put    { background: color-mix(in srgb, var(--color-put) 15%, transparent); color: var(--color-put); }
+  .method-patch  { background: color-mix(in srgb, var(--color-patch) 15%, transparent); color: var(--color-patch); }
+  .method-delete { background: color-mix(in srgb, var(--color-delete) 15%, transparent); color: var(--color-delete); }
+
+  .path { font-family: var(--font-mono); font-size: 13px; word-break: break-all; }
+  .auth-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--color-border-light);
+    color: var(--color-text-secondary);
+  }
+  .auth-open { background: color-mix(in srgb, var(--color-success) 12%, transparent); color: var(--color-success); }
+  .auth-admin { background: color-mix(in srgb, var(--color-danger) 12%, transparent); color: var(--color-danger); }
+  .auth-tenant { background: color-mix(in srgb, var(--color-primary) 12%, transparent); color: var(--color-primary); }
+  .auth-ip { background: color-mix(in srgb, var(--color-warning) 12%, transparent); color: var(--color-warning); }
+
+  /* ── Callout boxes ── */
+  .callout {
+    border-left: 4px solid;
+    padding: 14px 18px;
+    margin: 16px 0;
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-size: 14px;
+  }
+  .callout-info    { border-color: var(--color-info); background: color-mix(in srgb, var(--color-info) 8%, transparent); }
+  .callout-warning { border-color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 8%, transparent); }
+  .callout-danger  { border-color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 8%, transparent); }
+  .callout strong { font-weight: 600; }
+
+  /* ── Schema cards ── */
+  .schema-card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    margin: 16px 0;
+    overflow: hidden;
+  }
+  .schema-card-header {
+    background: var(--color-primary-light);
+    padding: 10px 16px;
+    font-weight: 600;
+    font-size: 14px;
+    border-bottom: 1px solid var(--color-border);
+    font-family: var(--font-mono);
+  }
+  .schema-card table { margin: 0; }
+  .field-required { color: var(--color-danger); font-size: 11px; font-weight: 600; }
+  .field-optional { color: var(--color-text-secondary); font-size: 11px; }
+  .field-type { font-family: var(--font-mono); font-size: 12px; color: var(--color-primary); }
+
+  /* ── Endpoint group ── */
+  .endpoint-group { margin-top: 28px; }
+  .endpoint-group-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .endpoint-count {
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--color-border-light);
+    color: var(--color-text-secondary);
+    padding: 2px 8px;
+    border-radius: 100px;
+  }
+
+  /* ── Lists ── */
+  ul, ol { margin: 8px 0 14px 24px; }
+  li { margin-bottom: 4px; }
+
+  /* ── Footer ── */
+  .doc-footer {
+    border-top: 1px solid var(--color-border);
+    padding: 32px 0;
+    margin-top: 64px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--color-text-secondary);
+  }
+
+  /* ── Print ── */
+  @media print {
+    body { font-size: 12px; color: #000; background: #fff; }
+    .container { max-width: 100%; padding: 0 24px; }
+    .cover { padding: 40px 0 30px; }
+    .cover h1 { font-size: 32px; }
+    section { page-break-inside: avoid; }
+    .table-wrap { border: 1px solid #ccc; }
+    .toc { page-break-after: always; }
+    pre { font-size: 11px; border: 1px solid #ddd; }
+    .callout { border-left-width: 3px; }
+    a { color: inherit; text-decoration: none; }
+    .no-print { display: none; }
+  }
+</style>
+
+<div class="container">
+
+  <!-- ════════════════════════ COVER ════════════════════════ -->
+  <header class="cover">
+    <div class="cover-badge">Integration Guide</div>
+    <h1>Turing Service API</h1>
+    <p class="subtitle">Multi-tenant voice calling platform — complete API reference for integration partners, frontend developers, and platform operators.</p>
+    <div class="cover-meta">
+      <span><strong>Version:</strong> 1.0.0</span>
+      <span><strong>Base URL:</strong> <code>https://&lt;your-domain&gt;:8005</code></span>
+      <span><strong>Endpoints:</strong> 68</span>
+      <span id="doc-date"><strong>Generated:</strong> —</span>
+    </div>
+  </header>
+
+  <!-- ════════════════════════ TOC ════════════════════════ -->
+  <nav class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+      <li><a href="#overview">Overview &amp; Architecture</a></li>
+      <li><a href="#quickstart">Quick Start</a></li>
+      <li><a href="#authentication">Authentication</a></li>
+      <li><a href="#errors">Error Handling</a></li>
+      <li><a href="#rate-limiting">Rate Limiting</a></li>
+      <li><a href="#health">Health &amp; Readiness</a></li>
+      <li><a href="#registration">Client Registration</a></li>
+      <li><a href="#portal">Portal &amp; Claim Links</a></li>
+      <li><a href="#admin">Admin Console</a></li>
+      <li><a href="#self-service">Self-Service (Me)</a></li>
+      <li><a href="#calls">Calls</a></li>
+      <li><a href="#batches">Batches</a></li>
+      <li><a href="#analytics">Analytics</a></li>
+      <li><a href="#agents">Agents</a></li>
+      <li><a href="#phone-numbers">Phone Numbers</a></li>
+      <li><a href="#sql-agent">SQL Builder Agent (Paused)</a></li>
+      <li><a href="#webhooks">Webhooks</a></li>
+      <li><a href="#schemas">Schema Reference</a></li>
+      <li><a href="#env-vars">Environment Variables</a></li>
+      <li><a href="#changelog">Changelog</a></li>
+    </ol>
+  </nav>
+
+  <!-- ════════════════════════ 1. OVERVIEW ════════════════════════ -->
+  <section id="overview">
+    <h2>01. Overview &amp; Architecture</h2>
+    <p>Turing Service is a <strong>multi-tenant voice calling orchestration platform</strong> built with FastAPI. It acts as a management and analytics layer on top of the Bolna voice engine, providing:</p>
+    <ul>
+      <li><strong>Multi-tenant isolation</strong> — each client (tenant) gets their own API keys, agent configurations, phone number assignments, and call data</li>
+      <li><strong>Batch call management</strong> — upload CSV or JSON recipient lists, schedule calls, monitor execution</li>
+      <li><strong>Real-time analytics</strong> — call volume, duration, cost, and outcome breakdowns with time-series support</li>
+      <li><strong>LLM-powered call analysis</strong> — automatic classification of call outcomes (booking, escalation, follow-up, etc.)</li>
+      <li><strong>Admin console</strong> — full lifecycle management of clients, agents, phone numbers, and drift detection</li>
+      <li><strong>SQL Builder Agent</strong> — natural-language-to-SQL query interface for analytics</li>
+    </ul>
+
+    <h3>Technology Stack</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Technology</th></tr></thead>
+        <tbody>
+          <tr><td>Framework</td><td>FastAPI (Python 3.11+)</td></tr>
+          <tr><td>Database</td><td>PostgreSQL (asyncpg via SQLAlchemy 2.0)</td></tr>
+          <tr><td>Cache / Rate Limiting</td><td>Redis (with in-memory fallback)</td></tr>
+          <tr><td>Voice Engine</td><td>Bolna AI (<code>api.bolna.ai</code>)</td></tr>
+          <tr><td>LLM Providers</td><td>Anthropic, OpenAI, Google (configurable)</td></tr>
+          <tr><td>Migrations</td><td>Alembic</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Authentication Zones</h3>
+    <p>The API is divided into four authentication zones, enforced by middleware:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Zone</th><th>Paths</th><th>Auth Method</th><th>Use Case</th></tr></thead>
+        <tbody>
+          <tr><td><span class="auth-badge auth-open">Open</span></td><td><code>/health/*</code>, <code>/v1/register</code>, <code>/v1/portal/*</code>, <code>/v1/claim/*</code></td><td>None</td><td>Health checks, onboarding</td></tr>
+          <tr><td><span class="auth-badge auth-admin">Admin</span></td><td><code>/v1/admin/*</code></td><td><code>X-Admin-Key</code> header</td><td>Platform operators</td></tr>
+          <tr><td><span class="auth-badge auth-tenant">Tenant</span></td><td><code>/v1/me/*</code>, <code>/v1/calls/*</code>, <code>/v1/batches/*</code>, etc.</td><td><code>X-API-Key</code> header</td><td>Integration partners</td></tr>
+          <tr><td><span class="auth-badge auth-ip">IP Allowlist</span></td><td><code>/webhooks/voice</code></td><td>Source IP verification</td><td>Voice engine callbacks</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ════════════════════════ 2. QUICKSTART ════════════════════════ -->
+  <section id="quickstart">
+    <h2>02. Quick Start</h2>
+    <p>Get from zero to your first API call in three steps.</p>
+
+    <h3>Step 1 — Register</h3>
+<pre>curl -X POST https://your-domain:8005/v1/register \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Acme Health", "contact_email": "dev@acme.com"}'</pre>
+
+    <h3>Step 2 — Get Your API Key</h3>
+    <p>After an admin approves your registration, you'll receive an API key via the claim link (or directly from the admin). The key looks like <code>tsk_abc123...</code>.</p>
+
+    <h3>Step 3 — Make Your First Call</h3>
+<pre>curl https://your-domain:8005/v1/calls \
+  -H "X-API-Key: tsk_your_api_key_here" \
+  -H "Content-Type: application/json"
+
+# Response: list of your calls (empty initially)</pre>
+
+    <h3>Step 4 — Create a Batch</h3>
+<pre>curl -X POST https://your-domain:8005/v1/batches \
+  -H "X-API-Key: tsk_your_api_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "your-agent-id",
+    "recipients": [
+      {"recipient_phone_number": "+919876543210", "user_data": {"name": "John"}}
+    ]
+  }'</pre>
+  </section>
+
+  <!-- ════════════════════════ 3. AUTHENTICATION ════════════════════════ -->
+  <section id="authentication">
+    <h2>03. Authentication</h2>
+
+    <h3>Tenant API Key (<code>X-API-Key</code>)</h3>
+    <p>All tenant-scoped endpoints require the <code>X-API-Key</code> header. Keys are issued per-client and can have multiple active keys with optional labels.</p>
+<pre>GET /v1/calls HTTP/1.1
+Host: your-domain:8005
+X-API-Key: tsk_abc123def456...</pre>
+
+    <div class="callout callout-info">
+      <strong>Key Caching:</strong> API keys are cached for <code>API_KEY_CACHE_TTL_SECONDS</code> (default 60s) after first lookup. Key revocation takes effect after cache expiry.
+    </div>
+
+    <h3>Admin Key (<code>X-Admin-Key</code>)</h3>
+    <p>All <code>/v1/admin/*</code> endpoints require the <code>X-Admin-Key</code> header. This is a single shared secret set via the <code>ADMIN_API_KEY</code> environment variable.</p>
+<pre>GET /v1/admin/clients HTTP/1.1
+Host: your-domain:8005
+X-Admin-Key: your-admin-secret</pre>
+
+    <h3>Webhook IP Allowlist</h3>
+    <p>The <code>/webhooks/voice</code> endpoint restricts access by source IP. Configure allowed IPs via <code>VOICE_WEBHOOK_ALLOWED_IPS</code> (comma-separated). An empty value allows all IPs.</p>
+
+    <h3>Error Responses</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Status</th><th>Condition</th></tr></thead>
+        <tbody>
+          <tr><td><code>401 Unauthorized</code></td><td>Missing or invalid API key</td></tr>
+          <tr><td><code>403 Forbidden</code></td><td>Client is suspended or inactive</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ════════════════════════ 4. ERRORS ════════════════════════ -->
+  <section id="errors">
+    <h2>04. Error Handling</h2>
+    <p>All errors follow a consistent JSON envelope:</p>
+<pre>{
+  "error": "validation_error",
+  "message": "Human-readable description",
+  "detail": { ... },
+  "request_id": "550e8400-e29b-41d4-a716-446655440000"
+}</pre>
+
+    <h3>Error Codes</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>HTTP Status</th><th><code>error</code> Code</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>400</td><td><code>http_error</code></td><td>Bad request — check the <code>detail</code> field</td></tr>
+          <tr><td>401</td><td><code>http_error</code></td><td>Authentication required or invalid credentials</td></tr>
+          <tr><td>403</td><td><code>http_error</code></td><td>Client suspended or insufficient permissions</td></tr>
+          <tr><td>404</td><td><code>http_error</code></td><td>Resource not found</td></tr>
+          <tr><td>422</td><td><code>validation_error</code></td><td>Request body failed Pydantic validation</td></tr>
+          <tr><td>429</td><td><code>http_error</code></td><td>Rate limit exceeded</td></tr>
+          <tr><td>500</td><td><code>internal_error</code></td><td>Unexpected server error</td></tr>
+          <tr><td>502</td><td><code>voice_engine_error</code></td><td>Upstream voice engine failure</td></tr>
+          <tr><td>502</td><td><code>llm_error</code></td><td>LLM provider failure (analysis / SQL agent)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout callout-info">
+      <strong>Request ID:</strong> Every response includes an <code>X-Request-ID</code> header. Include this when reporting issues for faster debugging.
+    </div>
+  </section>
+
+  <!-- ════════════════════════ 5. RATE LIMITING ════════════════════════ -->
+  <section id="rate-limiting">
+    <h2>05. Rate Limiting</h2>
+    <p>Rate limiting is enforced at the service layer using Redis (with an in-memory fallback when Redis is unavailable).</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Endpoint</th><th>Limit</th><th>Window</th></tr></thead>
+        <tbody>
+          <tr><td><code>POST /v1/register</code></td><td><code>REGISTER_RATE_LIMIT_PER_HOUR</code> (default: 10)</td><td>1 hour, per IP</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>When a limit is exceeded, the API returns <code>429 Too Many Requests</code>. Implement exponential backoff in your client.</p>
+  </section>
+
+  <!-- ════════════════════════ 6. HEALTH ════════════════════════ -->
+  <section id="health">
+    <h2>06. Health &amp; Readiness</h2>
+    <p>Use these endpoints for load balancer health checks and deployment readiness probes.</p>
+
+    <div class="endpoint-group">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="method method-get">GET</span></td>
+              <td class="path">/health</td>
+              <td><span class="auth-badge auth-open">Open</span></td>
+              <td>Basic liveness probe</td>
+            </tr>
+            <tr>
+              <td><span class="method method-get">GET</span></td>
+              <td class="path">/health/ready</td>
+              <td><span class="auth-badge auth-open">Open</span></td>
+              <td>Readiness probe (checks DB connectivity)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <h4>Response — <code>GET /health</code></h4>
+<pre>{
+  "status": "ok",
+  "service": "turing_service",
+  "version": "1.0.0",
+  "environment": "production"
+}</pre>
+  </section>
+
+  <!-- ════════════════════════ 7. REGISTRATION ════════════════════════ -->
+  <section id="registration">
+    <h2>07. Client Registration</h2>
+    <p>New clients self-register and wait for admin approval before receiving an API key.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="method method-post">POST</span></td>
+            <td class="path">/v1/register</td>
+            <td><span class="auth-badge auth-open">Open</span></td>
+            <td>Register a new client</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Request Body</h4>
+    <div class="schema-card">
+      <div class="schema-card-header">RegisterRequest</div>
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Constraints</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>name</code></td><td class="field-type">string</td><td><span class="field-required">required</span> 1–128 chars</td><td>Organization name</td></tr>
+          <tr><td><code>contact_email</code></td><td class="field-type">string | null</td><td><span class="field-optional">optional</span> max 256</td><td>Contact email address</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Response — <code>200 OK</code></h4>
+<pre>{
+  "status": "pending",
+  "message": "Registration submitted. You will be notified once approved."
+}</pre>
+  </section>
+
+  <!-- ════════════════════════ 8. PORTAL & CLAIM ════════════════════════ -->
+  <section id="portal">
+    <h2>08. Portal &amp; Claim Links</h2>
+    <p>The portal enables clients to look up their account, and claim links provide a one-time secure mechanism for distributing API keys.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="method method-post">POST</span></td>
+            <td class="path">/v1/portal/lookup</td>
+            <td><span class="auth-badge auth-open">Open</span></td>
+            <td>Look up client by name or email</td>
+          </tr>
+          <tr>
+            <td><span class="method method-get">GET</span></td>
+            <td class="path">/v1/claim/{token}</td>
+            <td><span class="auth-badge auth-open">Open</span></td>
+            <td>Preview claim link (non-destructive)</td>
+          </tr>
+          <tr>
+            <td><span class="method method-post">POST</span></td>
+            <td class="path">/v1/claim/{token}</td>
+            <td><span class="auth-badge auth-open">Open</span></td>
+            <td>Burn claim link and receive API key</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Claim Flow</h4>
+    <ol>
+      <li>Admin approves a client → system generates a one-time claim URL</li>
+      <li>Client visits <code>GET /v1/claim/{token}</code> to preview (see org name, expiry)</li>
+      <li>Client calls <code>POST /v1/claim/{token}</code> to consume the token and receive their API key</li>
+    </ol>
+
+    <div class="callout callout-warning">
+      <strong>One-time use:</strong> Claim tokens expire after <code>CLAIM_LINK_TTL_HOURS</code> (default 24h) and are destroyed on first successful consumption. Store the returned API key securely.
+    </div>
+
+    <h4>Response — <code>POST /v1/claim/{token}</code></h4>
+<pre>{
+  "client_name": "Acme Health",
+  "api_key": "tsk_live_a1b2c3d4e5f6..."
+}</pre>
+  </section>
+
+  <!-- ════════════════════════ 9. ADMIN ════════════════════════ -->
+  <section id="admin">
+    <h2>09. Admin Console</h2>
+    <p>The admin console provides full lifecycle management for all platform resources. All endpoints require <code>X-Admin-Key</code>.</p>
+
+    <!-- Client Management -->
+    <div class="endpoint-group">
+      <div class="endpoint-group-title">Client Management <span class="endpoint-count">9 endpoints</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/admin/clients</td><td>Create a new client</td></tr>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients</td><td>List all clients (filterable by status)</td></tr>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients/{client_id}</td><td>Get client details</td></tr>
+            <tr><td><span class="method method-patch">PATCH</span></td><td class="path">/v1/admin/clients/{client_id}</td><td>Update client name or email</td></tr>
+            <tr><td><span class="method method-delete">DELETE</span></td><td class="path">/v1/admin/clients/{client_id}</td><td>Delete a client</td></tr>
+            <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/admin/clients/{client_id}/approve</td><td>Approve a pending client (issues API key)</td></tr>
+            <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/admin/clients/{client_id}/reject</td><td>Reject a pending client</td></tr>
+            <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/admin/clients/{client_id}/suspend</td><td>Suspend an active client</td></tr>
+            <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/admin/clients/{client_id}/reactivate</td><td>Reactivate a suspended client</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- API Key Management -->
+    <div class="endpoint-group">
+      <div class="endpoint-group-title">API Key Management <span class="endpoint-count">3 endpoints</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients/{client_id}/keys</td><td>List client's API keys</td></tr>
+            <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/admin/clients/{client_id}/keys</td><td>Issue a new API key</td></tr>
+            <tr><td><span class="method method-delete">DELETE</span></td><td class="path">/v1/admin/clients/{client_id}/keys/{key_id}</td><td>Revoke an API key</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Client Config -->
+    <div class="endpoint-group">
+      <div class="endpoint-group-title">Client Configuration <span class="endpoint-count">2 endpoints</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients/{client_id}/config</td><td>Get client configuration</td></tr>
+            <tr><td><span class="method method-put">PUT</span></td><td class="path">/v1/admin/clients/{client_id}/config</td><td>Update client configuration</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Configuration Fields</h4>
+      <div class="schema-card">
+        <div class="schema-card-header">ClientConfigUpdate</div>
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>default_from_number</code></td><td class="field-type">string | null</td><td>Default caller ID for outbound calls</td></tr>
+            <tr><td><code>webhook_url</code></td><td class="field-type">string | null</td><td>URL to receive call outcome webhooks</td></tr>
+            <tr><td><code>webhook_secret</code></td><td class="field-type">string | null</td><td>HMAC secret for webhook signature verification</td></tr>
+            <tr><td><code>visible_fields</code></td><td class="field-type">object | null</td><td>Fields visible in the client portal</td></tr>
+            <tr><td><code>settings</code></td><td class="field-type">object | null</td><td>Custom settings JSON</td></tr>
+            <tr><td><code>analysis_llm_provider</code></td><td class="field-type">string | null</td><td>LLM provider for call analysis (<code>anthropic</code>, <code>openai</code>)</td></tr>
+            <tr><td><code>analysis_llm_model</code></td><td class="field-type">string | null</td><td>Model override (e.g. <code>gpt-4o</code>)</td></tr>
+            <tr><td><code>analysis_prompt_hint</code></td><td class="field-type">string | null</td><td>Custom prompt hint appended to analysis</td></tr>
+            <tr><td><code>analysis_llm_api_key</code></td><td class="field-type">string | null</td><td>Client's own LLM API key (encrypted at rest)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Agent Management -->
+    <div class="endpoint-group">
+      <div class="endpoint-group-title">Agent Management <span class="endpoint-count">7 endpoints</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/agents</td><td>List all agents in the catalog</td></tr>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/agents/{agent_id}/variables</td><td>Get agent prompt variables</td></tr>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients/{client_id}/agents</td><td>List agents assigned to a client</td></tr>
+            <tr><td><span class="method method-put">PUT</span></td><td class="path">/v1/admin/clients/{client_id}/agents</td><td>Set which agents a client can use</td></tr>
+            <tr><td><span class="method method-patch">PATCH</span></td><td class="path">/v1/admin/clients/{client_id}/agents/{voice_agent_id}</td><td>Update per-client agent config (display name, variable overrides)</td></tr>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients/{client_id}/drift</td><td>List drift events for a client</td></tr>
+            <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/admin/clients/{client_id}/drift/{event_id}/acknowledge</td><td>Acknowledge a drift event</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Sync -->
+    <div class="endpoint-group">
+      <div class="endpoint-group-title">Sync Operations <span class="endpoint-count">2 endpoints</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/admin/agents/sync</td><td>Sync agent catalog from voice engine</td></tr>
+            <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/admin/phone-numbers/sync</td><td>Sync phone number catalog from voice engine</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Voice Engine -->
+    <div class="endpoint-group">
+      <div class="endpoint-group-title">Voice Engine &amp; Phone Numbers <span class="endpoint-count">4 endpoints</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/voice-engine/status</td><td>Check voice engine connectivity</td></tr>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/phone-numbers</td><td>List all phone numbers in catalog</td></tr>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients/{client_id}/phone-numbers</td><td>List phone numbers assigned to a client</td></tr>
+            <tr><td><span class="method method-put">PUT</span></td><td class="path">/v1/admin/clients/{client_id}/phone-numbers</td><td>Assign phone numbers to a client</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Admin Calls & Analytics -->
+    <div class="endpoint-group">
+      <div class="endpoint-group-title">Admin Calls &amp; Analytics <span class="endpoint-count">8 endpoints</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients/{client_id}/calls</td><td>List calls for a client</td></tr>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients/{client_id}/calls/{call_id}</td><td>Get call detail (transcript, analysis)</td></tr>
+            <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/admin/clients/{client_id}/calls/{call_id}/analyze</td><td>Trigger LLM analysis for a call</td></tr>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients/{client_id}/batches</td><td>List batches for a client</td></tr>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients/{client_id}/analytics/overview</td><td>Analytics overview for a client</td></tr>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients/{client_id}/analytics/by-agent</td><td>Analytics grouped by agent</td></tr>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients/{client_id}/analytics/by-batch</td><td>Analytics grouped by batch</td></tr>
+            <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/admin/clients/{client_id}/analytics/timeseries</td><td>Time-series analytics data</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════ 10. SELF-SERVICE ════════════════════════ -->
+  <section id="self-service">
+    <h2>10. Self-Service (Me)</h2>
+    <p>Tenant-facing endpoints for clients to manage their own account. Requires <code>X-API-Key</code>.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/me</td><td>Get own client profile</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/me/config</td><td>Get own configuration</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/me/keys</td><td>List own API keys</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/me/keys</td><td>Issue a new API key for self</td></tr>
+          <tr><td><span class="method method-delete">DELETE</span></td><td class="path">/v1/me/keys/{key_id}</td><td>Revoke own API key</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Response — <code>GET /v1/me</code></h4>
+<pre>{
+  "client_id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Acme Health",
+  "slug": "acme-health",
+  "contact_email": "dev@acme.com",
+  "status": "active",
+  "created_at": "2025-01-15T10:30:00Z",
+  "approved_at": "2025-01-15T11:00:00Z",
+  "active_key_count": 2
+}</pre>
+  </section>
+
+  <!-- ════════════════════════ 11. CALLS ════════════════════════ -->
+  <section id="calls">
+    <h2>11. Calls</h2>
+    <p>Manage and monitor individual voice calls. Requires <code>X-API-Key</code>.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/calls</td><td>List calls (paginated, filterable)</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/calls/{execution_id}</td><td>Get call detail (transcript, extracted data, analysis)</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/calls/{execution_id}/stop</td><td>Stop an in-progress call</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/calls/{execution_id}/analyze</td><td>Trigger LLM analysis for a call</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Response — <code>GET /v1/calls</code> (paginated)</h4>
+<pre>{
+  "items": [
+    {
+      "call_id": "exec_abc123",
+      "agent_id": "agent-001",
+      "batch_id": "550e8400-...",
+      "contact_number": "+919876543210",
+      "from_number": "+911234567890",
+      "status": "completed",
+      "duration": 45.2,
+      "cost": 0.12,
+      "hangup_reason": "customer_ended",
+      "recording_url": "https://...",
+      "created_at": "2025-01-20T14:30:00Z",
+      "analysis": {
+        "outcome": "booking",
+        "summary": "Patient confirmed appointment for Jan 25",
+        "confidence": 0.92
+      }
+    }
+  ],
+  "total": 150,
+  "page": 1,
+  "page_size": 20,
+  "pages": 8
+}</pre>
+
+    <h3>Call Analysis</h3>
+    <p>The <code>POST /v1/calls/{execution_id}/analyze</code> endpoint triggers LLM-powered analysis of a call's transcript.</p>
+
+    <h4>Outcome Categories</h4>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Outcome</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>booking</code></td><td>Appointment or action was confirmed</td></tr>
+          <tr><td><code>escalation</code></td><td>Call was escalated to a human</td></tr>
+          <tr><td><code>not_interested</code></td><td>Recipient declined or hung up</td></tr>
+          <tr><td><code>follow_up</code></td><td>Requires a follow-up call</td></tr>
+          <tr><td><code>no_output</code></td><td>No meaningful conversation occurred</td></tr>
+          <tr><td><code>not_reached</code></td><td>Call did not connect</td></tr>
+          <tr><td><code>other</code></td><td>Doesn't fit other categories</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ════════════════════════ 12. BATCHES ════════════════════════ -->
+  <section id="batches">
+    <h2>12. Batches</h2>
+    <p>Create and manage batch calling campaigns. Requires <code>X-API-Key</code>.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/batches</td><td>Create a batch from JSON recipients</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/batches/upload</td><td>Create a batch from CSV upload</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/batches/{batch_id}/schedule</td><td>Schedule a batch for execution</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/batches</td><td>List all batches (paginated)</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/batches/by-agent/{agent_id}</td><td>List batches for a specific agent</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/batches/{batch_id}</td><td>Get batch details</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/batches/{batch_id}/executions</td><td>List individual call executions in a batch</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/batches/{batch_id}/metrics</td><td>Get batch metrics (completion, cost, duration)</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/batches/{batch_id}/stop</td><td>Stop all pending calls in a batch</td></tr>
+          <tr><td><span class="method method-delete">DELETE</span></td><td class="path">/v1/batches/{batch_id}</td><td>Delete a batch</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Create Batch — Request Body</h4>
+    <div class="schema-card">
+      <div class="schema-card-header">CreateBatchRequest</div>
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Constraints</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>agent_id</code></td><td class="field-type">string</td><td><span class="field-required">required</span></td><td>Voice agent ID (must be enabled for your tenant)</td></tr>
+          <tr><td><code>recipients</code></td><td class="field-type">array[object]</td><td><span class="field-required">required</span> min 1</td><td>List of recipients with phone numbers and user data</td></tr>
+          <tr><td><code>from_phone_numbers</code></td><td class="field-type">array[string] | null</td><td><span class="field-optional">optional</span></td><td>Caller IDs to rotate through</td></tr>
+          <tr><td><code>retry_config</code></td><td class="field-type">RetryConfig | null</td><td><span class="field-optional">optional</span></td><td>Retry policy for failed calls</td></tr>
+          <tr><td><code>webhook_url</code></td><td class="field-type">string | null</td><td><span class="field-optional">optional</span></td><td>Override webhook URL for this batch</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Retry Configuration</h4>
+    <div class="schema-card">
+      <div class="schema-card-header">RetryConfig</div>
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>enabled</code></td><td class="field-type">boolean</td><td>Enable/disable retries</td></tr>
+          <tr><td><code>max_retries</code></td><td class="field-type">integer</td><td>Maximum retry attempts</td></tr>
+          <tr><td><code>retry_on_statuses</code></td><td class="field-type">array[string]</td><td>Statuses that trigger a retry</td></tr>
+          <tr><td><code>retry_on_voicemail</code></td><td class="field-type">boolean</td><td>Retry if call hits voicemail</td></tr>
+          <tr><td><code>retry_intervals_minutes</code></td><td class="field-type">array[integer]</td><td>Delays between retries (min 15 min each)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Example — Create &amp; Schedule a Batch</h4>
+<pre># 1. Create
+curl -X POST https://your-domain:8005/v1/batches \
+  -H "X-API-Key: tsk_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "agent-appointment-reminder",
+    "recipients": [
+      {"recipient_phone_number": "+919876543210", "user_data": {"name": "Ravi", "date": "Jan 28"}},
+      {"recipient_phone_number": "+919876543211", "user_data": {"name": "Priya", "date": "Jan 29"}}
+    ],
+    "retry_config": {"enabled": true, "max_retries": 2, "retry_intervals_minutes": [30, 60]}
+  }'
+
+# 2. Schedule
+curl -X POST https://your-domain:8005/v1/batches/{batch_id}/schedule \
+  -H "X-API-Key: tsk_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{"scheduled_at": "2025-01-28T09:00:00Z"}'</pre>
+  </section>
+
+  <!-- ════════════════════════ 13. ANALYTICS ════════════════════════ -->
+  <section id="analytics">
+    <h2>13. Analytics</h2>
+    <p>Retrieve call performance metrics for your tenant. Requires <code>X-API-Key</code>. All endpoints support <code>date_from</code> and <code>date_to</code> query parameters.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/analytics/overview</td><td>Aggregate stats: volume, duration, cost, outcomes</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/analytics/by-agent</td><td>Stats broken down by agent</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/analytics/by-batch</td><td>Stats broken down by batch</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/analytics/timeseries</td><td>Daily time-series data for charting</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Response — <code>GET /v1/analytics/overview</code></h4>
+<pre>{
+  "period": {"date_from": "2025-01-01", "date_to": "2025-01-31"},
+  "call_volume": {
+    "total": 1200, "connected": 890, "not_connected": 280,
+    "pending": 30, "connection_rate": 0.742
+  },
+  "duration": {
+    "total_seconds": 40200.5, "avg_seconds": 45.2,
+    "p50_seconds": 38.0, "p90_seconds": 72.0
+  },
+  "cost": {
+    "total": 144.60, "avg_per_call": 0.121, "avg_per_connected": 0.163
+  },
+  "outcomes": {
+    "analyzed_count": 850, "coverage_pct": 95.5,
+    "booking": {"count": 340, "pct_of_analyzed": 40.0},
+    "escalation": {"count": 85, "pct_of_analyzed": 10.0},
+    "not_interested": {"count": 170, "pct_of_analyzed": 20.0},
+    "follow_up": {"count": 128, "pct_of_analyzed": 15.1},
+    "no_output": {"count": 42, "pct_of_analyzed": 4.9},
+    "not_reached": {"count": 60, "pct_of_analyzed": 7.1},
+    "other": {"count": 25, "pct_of_analyzed": 2.9}
+  },
+  "not_connected_breakdown": {"busy": 45, "no_answer": 180, "failed": 55},
+  "retry_stats": {"calls_with_retry": 120, "avg_retries": 1.4}
+}</pre>
+  </section>
+
+  <!-- ════════════════════════ 14. AGENTS ════════════════════════ -->
+  <section id="agents">
+    <h2>14. Agents</h2>
+    <p>List and inspect voice agents assigned to your tenant. Requires <code>X-API-Key</code>.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/agents</td><td>List agents enabled for your tenant</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/agents/drift</td><td>List drift events (agent changes detected)</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/agents/{agent_id}/variables</td><td>Get required/optional prompt variables for an agent</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Agent Variables</h4>
+    <p>Agents use prompt variables that are injected at call time. Use the variables endpoint to discover what each agent expects:</p>
+<pre>{
+  "agent_id": "agent-appointment-reminder",
+  "required": ["name", "date", "time", "doctor_name"],
+  "optional": ["clinic_address"],
+  "system_injected": ["contact_number", "from_number"],
+  "all_prompt_variables": ["name", "date", "time", "doctor_name", "clinic_address", "contact_number", "from_number"]
+}</pre>
+
+    <div class="callout callout-warning">
+      <strong>Variable Validation:</strong> When creating a batch, each recipient's <code>user_data</code> must include all <code>required</code> variables for the selected agent. Missing variables will cause a validation error.
+    </div>
+  </section>
+
+  <!-- ════════════════════════ 15. PHONE NUMBERS ════════════════════════ -->
+  <section id="phone-numbers">
+    <h2>15. Phone Numbers</h2>
+    <p>List phone numbers assigned to your tenant. Requires <code>X-API-Key</code>.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-get">GET</span></td><td class="path">/v1/phone-numbers</td><td>List assigned phone numbers and the default caller ID</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Response</h4>
+<pre>{
+  "default_from_number": "+911234567890",
+  "phone_numbers": [
+    {
+      "id": "pn_001",
+      "phone_number": "+911234567890",
+      "telephony_provider": "twilio",
+      "rented": true,
+      "renewal_at": "2025-03-01"
+    }
+  ]
+}</pre>
+  </section>
+
+  <!-- ════════════════════════ 16. SQL AGENT ════════════════════════ -->
+  <section id="sql-agent">
+    <h2>16. SQL Builder Agent</h2>
+
+    <div class="callout callout-danger">
+      <strong>Status: Disabled — Not Currently Available.</strong> The SQL Builder Agent is paused and its endpoint is not mounted in the running application. The feature requires a dedicated read-only PostgreSQL connection (<code>KALAAM_READONLY_DATABASE_URL</code>) and LLM API keys that are not configured in the current deployment. The router is gracefully skipped at startup when dependencies are unavailable. This section is retained for future reference.
+    </div>
+
+    <p>Natural language to SQL query interface. Ask questions about your call data in plain English. Requires <code>X-API-Key</code> and a configured Kalaam read-only database connection.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Status</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-post">POST</span></td><td class="path">/v1/sql-agent/query</td><td><span class="auth-badge" style="background:color-mix(in srgb, var(--color-danger) 15%, transparent);color:var(--color-danger);">Disabled</span></td><td>Submit a natural language query</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Prerequisites (when re-enabled)</h3>
+    <p>The SQL Builder Agent requires the following environment variables to be configured before it can be activated:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Variable</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>KALAAM_READONLY_DATABASE_URL</code></td><td>Read-only PostgreSQL connection to the target Kalaam DB (dedicated <code>sql_agent_readonly</code> role)</td></tr>
+          <tr><td><code>GOOGLE_API_KEY</code> or <code>ANTHROPIC_API_KEY</code></td><td>LLM API key for SQL generation (default model: <code>gemini-2.5-flash</code>)</td></tr>
+          <tr><td><code>SQL_AGENT_CONTROL_DB_URL</code></td><td>Database for SQL agent metadata and workspace catalog</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Example (for future reference)</h4>
+<pre># This endpoint is currently disabled. When re-enabled:
+curl -X POST https://your-domain:8005/v1/sql-agent/query \
+  -H "X-API-Key: tsk_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "How many calls were completed last week with a booking outcome?"}'</pre>
+
+    <div class="callout callout-info">
+      <strong>Safety (when enabled):</strong> The SQL agent connects via a PostgreSQL role with <code>default_transaction_read_only=on</code> and a configurable <code>statement_timeout</code>. All generated queries are validated with <code>EXPLAIN</code> before execution and scoped to the tenant's data.
+    </div>
+  </section>
+
+  <!-- ════════════════════════ 17. WEBHOOKS ════════════════════════ -->
+  <section id="webhooks">
+    <h2>17. Webhooks</h2>
+
+    <h3>Inbound — Voice Engine Callback</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="method method-post">POST</span></td>
+            <td class="path">/webhooks/voice</td>
+            <td><span class="auth-badge auth-ip">IP Allowlist</span></td>
+            <td>Receives call status updates from the voice engine</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>This endpoint is called by the Bolna voice engine to report call status changes, transcripts, and extracted data. Configure <code>TURING_PUBLIC_URL</code> so the voice engine knows where to send callbacks.</p>
+
+    <h3>Outbound — Call Outcome Notifications</h3>
+    <p>When a client configures a <code>webhook_url</code> in their client config, Turing sends a POST request for each completed call with outcome data.</p>
+
+    <h4>Webhook Payload</h4>
+<pre>POST https://your-webhook-endpoint.com/callback
+Content-Type: application/json
+X-Turing-Signature: sha256=abc123...
+
+{
+  "call_id": "exec_abc123",
+  "agent_id": "agent-001",
+  "voice_batch_id": "vb_xyz789",
+  "contact_number": "+919876543210",
+  "status": "completed",
+  "duration": 45.2,
+  "outcome": "booking",
+  "summary": "Patient confirmed appointment"
+}</pre>
+
+    <h4>Signature Verification</h4>
+    <p>If <code>webhook_secret</code> is set, Turing signs the request body with HMAC-SHA256. Verify using:</p>
+<pre>import hmac, hashlib
+
+def verify_signature(body: bytes, secret: str, signature: str) -> bool:
+    expected = "sha256=" + hmac.new(
+        secret.encode(), body, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)</pre>
+  </section>
+
+  <!-- ════════════════════════ 18. SCHEMAS ════════════════════════ -->
+  <section id="schemas">
+    <h2>18. Schema Reference</h2>
+    <p>Complete reference for all request/response models used across the API.</p>
+
+    <h3>Call Schemas</h3>
+
+    <div class="schema-card">
+      <div class="schema-card-header">CallListItem</div>
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>call_id</code></td><td class="field-type">string | null</td><td>Voice engine execution ID</td></tr>
+          <tr><td><code>agent_id</code></td><td class="field-type">string</td><td>Agent that handled the call</td></tr>
+          <tr><td><code>batch_id</code></td><td class="field-type">uuid | null</td><td>Batch this call belongs to</td></tr>
+          <tr><td><code>contact_number</code></td><td class="field-type">string | null</td><td>Recipient phone number</td></tr>
+          <tr><td><code>from_number</code></td><td class="field-type">string | null</td><td>Caller ID used</td></tr>
+          <tr><td><code>status</code></td><td class="field-type">string</td><td>Call status</td></tr>
+          <tr><td><code>duration</code></td><td class="field-type">float | null</td><td>Duration in seconds</td></tr>
+          <tr><td><code>cost</code></td><td class="field-type">float | null</td><td>Cost in USD</td></tr>
+          <tr><td><code>hangup_reason</code></td><td class="field-type">string | null</td><td>Why the call ended</td></tr>
+          <tr><td><code>recording_url</code></td><td class="field-type">string | null</td><td>URL to call recording</td></tr>
+          <tr><td><code>created_at</code></td><td class="field-type">string | null</td><td>ISO 8601 timestamp</td></tr>
+          <tr><td><code>analysis</code></td><td class="field-type">CallAnalysisResult | null</td><td>LLM analysis results</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="schema-card">
+      <div class="schema-card-header">CallDetail <small>(extends CallListItem)</small></div>
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>transcript</code></td><td class="field-type">string | null</td><td>Full conversation transcript</td></tr>
+          <tr><td><code>extracted_data</code></td><td class="field-type">object | null</td><td>Structured data extracted by the agent</td></tr>
+          <tr><td><code>patient_ref</code></td><td class="field-type">string | null</td><td>Patient reference identifier</td></tr>
+          <tr><td><code>retry_count</code></td><td class="field-type">integer | null</td><td>Number of retry attempts</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="schema-card">
+      <div class="schema-card-header">CallAnalysisResult</div>
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>outcome</code></td><td class="field-type">string</td><td>Classification (booking, escalation, etc.)</td></tr>
+          <tr><td><code>summary</code></td><td class="field-type">string | null</td><td>Brief summary of the call</td></tr>
+          <tr><td><code>reason</code></td><td class="field-type">string | null</td><td>Explanation for the classification</td></tr>
+          <tr><td><code>requests</code></td><td class="field-type">array[string]</td><td>Specific requests made during the call</td></tr>
+          <tr><td><code>urgency</code></td><td class="field-type">string | null</td><td>Urgency level of the call</td></tr>
+          <tr><td><code>confidence</code></td><td class="field-type">float | null</td><td>Model confidence (0–1)</td></tr>
+          <tr><td><code>symptoms_reported</code></td><td class="field-type">array[string] | null</td><td>Health symptoms mentioned</td></tr>
+          <tr><td><code>model_used</code></td><td class="field-type">string | null</td><td>LLM model used for analysis</td></tr>
+          <tr><td><code>analyzed_at</code></td><td class="field-type">datetime | null</td><td>When analysis was performed</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Admin Schemas</h3>
+
+    <div class="schema-card">
+      <div class="schema-card-header">ClientSummary</div>
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td class="field-type">uuid</td><td>Client ID</td></tr>
+          <tr><td><code>name</code></td><td class="field-type">string</td><td>Organization name</td></tr>
+          <tr><td><code>slug</code></td><td class="field-type">string</td><td>URL-safe identifier</td></tr>
+          <tr><td><code>contact_email</code></td><td class="field-type">string | null</td><td>Contact email</td></tr>
+          <tr><td><code>status</code></td><td class="field-type">string</td><td>pending | active | suspended | rejected</td></tr>
+          <tr><td><code>created_at</code></td><td class="field-type">datetime</td><td>Registration timestamp</td></tr>
+          <tr><td><code>approved_at</code></td><td class="field-type">datetime | null</td><td>Approval timestamp</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="schema-card">
+      <div class="schema-card-header">ApproveResponse</div>
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>client_id</code></td><td class="field-type">uuid</td><td>Approved client ID</td></tr>
+          <tr><td><code>status</code></td><td class="field-type">string</td><td>New status (active)</td></tr>
+          <tr><td><code>api_key</code></td><td class="field-type">string</td><td>Issued API key (shown only once)</td></tr>
+          <tr><td><code>claim_url</code></td><td class="field-type">string | null</td><td>One-time claim URL (if claim links enabled)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="schema-card">
+      <div class="schema-card-header">KeySummary</div>
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td class="field-type">uuid</td><td>Key ID</td></tr>
+          <tr><td><code>key_prefix</code></td><td class="field-type">string</td><td>First characters for identification</td></tr>
+          <tr><td><code>label</code></td><td class="field-type">string | null</td><td>Optional label</td></tr>
+          <tr><td><code>status</code></td><td class="field-type">string</td><td>active | revoked</td></tr>
+          <tr><td><code>last_used_at</code></td><td class="field-type">datetime | null</td><td>Last API call timestamp</td></tr>
+          <tr><td><code>expires_at</code></td><td class="field-type">datetime | null</td><td>Expiry (null = no expiry)</td></tr>
+          <tr><td><code>created_at</code></td><td class="field-type">datetime</td><td>Issuance timestamp</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Batch Schemas</h3>
+
+    <div class="schema-card">
+      <div class="schema-card-header">BatchSummary</div>
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>batch_id</code></td><td class="field-type">string | null</td><td>Internal batch ID</td></tr>
+          <tr><td><code>internal_id</code></td><td class="field-type">string | null</td><td>Voice engine batch ID</td></tr>
+          <tr><td><code>status</code></td><td class="field-type">string | null</td><td>created | scheduled | in_progress | completed | stopped</td></tr>
+          <tr><td><code>scheduled_at</code></td><td class="field-type">string | null</td><td>Scheduled execution time</td></tr>
+          <tr><td><code>file_name</code></td><td class="field-type">string | null</td><td>CSV filename (if uploaded)</td></tr>
+          <tr><td><code>valid_contacts</code></td><td class="field-type">integer | null</td><td>Valid recipients after validation</td></tr>
+          <tr><td><code>total_contacts</code></td><td class="field-type">integer | null</td><td>Total recipients submitted</td></tr>
+          <tr><td><code>from_phone_numbers</code></td><td class="field-type">array[string] | null</td><td>Caller IDs used</td></tr>
+          <tr><td><code>execution_status</code></td><td class="field-type">object | null</td><td>Execution progress counts</td></tr>
+          <tr><td><code>created_at</code></td><td class="field-type">string | null</td><td>Creation timestamp</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="schema-card">
+      <div class="schema-card-header">BatchMetricsResponse</div>
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>batch_id</code></td><td class="field-type">string</td><td>Internal batch ID</td></tr>
+          <tr><td><code>voice_batch_id</code></td><td class="field-type">string | null</td><td>Voice engine batch ID</td></tr>
+          <tr><td><code>status</code></td><td class="field-type">string</td><td>Current batch status</td></tr>
+          <tr><td><code>total_recipients</code></td><td class="field-type">integer</td><td>Total recipients</td></tr>
+          <tr><td><code>calls_tracked</code></td><td class="field-type">integer</td><td>Calls with tracking data</td></tr>
+          <tr><td><code>by_status</code></td><td class="field-type">object</td><td>Call count by status</td></tr>
+          <tr><td><code>completed</code></td><td class="field-type">integer</td><td>Successfully completed calls</td></tr>
+          <tr><td><code>terminal</code></td><td class="field-type">integer</td><td>Calls in terminal state</td></tr>
+          <tr><td><code>success_rate</code></td><td class="field-type">float | null</td><td>Completion rate (0–1)</td></tr>
+          <tr><td><code>total_cost</code></td><td class="field-type">float</td><td>Total cost in USD</td></tr>
+          <tr><td><code>avg_duration_seconds</code></td><td class="field-type">float | null</td><td>Average call duration</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ════════════════════════ 19. ENV VARS ════════════════════════ -->
+  <section id="env-vars">
+    <h2>19. Environment Variables</h2>
+    <p>Complete list of environment variables for deployment configuration.</p>
+
+    <h3>Core Application</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>APP_NAME</code></td><td><code>turing_service</code></td><td>Application name</td></tr>
+          <tr><td><code>ENVIRONMENT</code></td><td><code>development</code></td><td>Runtime environment</td></tr>
+          <tr><td><code>LOG_LEVEL</code></td><td><code>INFO</code></td><td>Logging verbosity</td></tr>
+          <tr><td><code>HOST</code></td><td><code>0.0.0.0</code></td><td>Bind address</td></tr>
+          <tr><td><code>PORT</code></td><td><code>8005</code></td><td>Bind port</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Database &amp; Cache</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>DATABASE_URL</code></td><td><code>postgresql+asyncpg://turing:turing@localhost:5433/turing_db</code></td><td>Primary database connection string</td></tr>
+          <tr><td><code>REDIS_URL</code></td><td><code>null</code></td><td>Redis connection (for rate limiting &amp; claim links)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Authentication</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>ADMIN_API_KEY</code></td><td>—</td><td><span class="field-required">required</span> Shared secret for admin endpoints</td></tr>
+          <tr><td><code>API_KEY_CACHE_TTL_SECONDS</code></td><td><code>60</code></td><td>Tenant API key cache duration</td></tr>
+          <tr><td><code>ENCRYPTION_KEY</code></td><td><code>null</code></td><td>Fernet key for encrypting sensitive config (LLM API keys)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Voice Engine</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>VOICE_ENGINE_API_KEY</code></td><td>—</td><td><span class="field-required">required</span> Bolna AI API key</td></tr>
+          <tr><td><code>VOICE_ENGINE_BASE_URL</code></td><td><code>https://api.bolna.ai</code></td><td>Voice engine base URL</td></tr>
+          <tr><td><code>VOICE_ENGINE_TIMEOUT_SECONDS</code></td><td><code>30</code></td><td>HTTP timeout for voice engine calls</td></tr>
+          <tr><td><code>VOICE_DEFAULT_FROM_NUMBER</code></td><td><code>null</code></td><td>System-wide default caller ID</td></tr>
+          <tr><td><code>VOICE_WEBHOOK_ALLOWED_IPS</code></td><td><code>""</code></td><td>Comma-separated IPs allowed for voice webhooks</td></tr>
+          <tr><td><code>TURING_PUBLIC_URL</code></td><td><code>null</code></td><td>Public URL for voice engine to send callbacks to</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>LLM / Analysis</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>LLM_PROVIDER</code></td><td><code>anthropic</code></td><td>Default LLM provider for call analysis</td></tr>
+          <tr><td><code>LLM_MODEL</code></td><td><code>null</code></td><td>Model override (provider default if null)</td></tr>
+          <tr><td><code>ANTHROPIC_API_KEY</code></td><td><code>null</code></td><td>Anthropic API key</td></tr>
+          <tr><td><code>OPENAI_API_KEY</code></td><td><code>null</code></td><td>OpenAI API key</td></tr>
+          <tr><td><code>GOOGLE_API_KEY</code></td><td><code>null</code></td><td>Google API key (for SQL Agent)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Features &amp; Limits</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>REGISTER_RATE_LIMIT_PER_HOUR</code></td><td><code>10</code></td><td>Max registration attempts per IP per hour</td></tr>
+          <tr><td><code>CLAIM_LINK_TTL_HOURS</code></td><td><code>24</code></td><td>Claim link expiry in hours</td></tr>
+          <tr><td><code>AGENT_SYNC_INTERVAL_MINUTES</code></td><td><code>15</code></td><td>Auto-sync interval for agent catalog</td></tr>
+          <tr><td><code>CONSOLE_PUBLIC_URL</code></td><td><code>null</code></td><td>Frontend console URL (for claim link generation)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>SQL Agent (Advanced)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>SQL_AGENT_CONTROL_DB_URL</code></td><td>—</td><td>Database for SQL agent metadata</td></tr>
+          <tr><td><code>KALAAM_READONLY_DATABASE_URL</code></td><td>—</td><td>Read-only connection to Kalaam production DB</td></tr>
+          <tr><td><code>SQL_AGENT_EXPLAIN_VALIDATION</code></td><td><code>true</code></td><td>Validate generated SQL with EXPLAIN</td></tr>
+          <tr><td><code>SQL_AGENT_MAX_REPAIR_ATTEMPTS</code></td><td><code>3</code></td><td>Max LLM repair attempts for invalid SQL</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ════════════════════════ 20. CHANGELOG ════════════════════════ -->
+  <section id="changelog">
+    <h2>20. Changelog</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>1.0.0</strong></td>
+            <td id="changelog-date">—</td>
+            <td>
+              Initial integration guide covering all 68 endpoints across 13 routers.<br>
+              Includes: multi-tenant auth, admin console, batch management, analytics,<br>
+              call analysis, SQL builder agent, webhook flows, and full schema reference.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ════════════════════════ FOOTER ════════════════════════ -->
+  <footer class="doc-footer">
+    <p><strong>Turing Service</strong> — Multi-Tenant Voice Calling Platform</p>
+    <p>Docstribe &middot; Confidential &middot; For authorized integration partners only</p>
+  </footer>
+
+</div>
+
+<script>
+  const now = new Date();
+  const fmt = now.toLocaleDateString('en-US', {year:'numeric',month:'long',day:'numeric'});
+  document.getElementById('doc-date').innerHTML = '<strong>Generated:</strong> ' + fmt;
+  document.getElementById('changelog-date').textContent = now.toISOString().slice(0,10);
+</script>

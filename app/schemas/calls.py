@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, overload
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+@overload
+def normalize_scheduled_at(value: str) -> str: ...
+@overload
+def normalize_scheduled_at(value: None) -> None: ...
 def normalize_scheduled_at(value: str | None) -> str | None:
     """Bolna rejects the ``Z`` UTC suffix (returns 500); convert to ``+00:00``."""
     if value is None:
@@ -24,7 +28,8 @@ class RetryConfig(BaseModel):
     max_retries: int | None = None
     retry_on_statuses: list[str] | None = None
     retry_on_voicemail: bool | None = None
-    retry_intervals_minutes: list[int] | None = None
+    # Bolna rejects intervals below 15 minutes.
+    retry_intervals_minutes: list[Annotated[int, Field(ge=15)]] | None = None
 
 
 class MakeCallRequest(BaseModel):
@@ -58,8 +63,8 @@ class MakeCallRequest(BaseModel):
     def _normalize_scheduled_at(cls, value: str | None) -> str | None:
         return normalize_scheduled_at(value)
 
-    def to_bolna_payload(self) -> dict[str, Any]:
-        """Build the Bolna ``POST /call`` body, dropping unset fields."""
+    def to_voice_engine_payload(self) -> dict[str, Any]:
+        """Build the voice engine's ``POST /call`` body, dropping unset fields."""
         return self.model_dump(exclude_none=True)
 
 

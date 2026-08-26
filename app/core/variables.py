@@ -1,23 +1,24 @@
 """Read-only introspection of an agent's variables.
 
-We NEVER modify an agent. We only read its existing Bolna config to discover
-which ``{placeholder}`` variables its prompt already references, so turing can
-validate that a caller supplied them before placing a call.
+We NEVER modify an agent. We only read its existing voice-engine config to
+discover which ``{placeholder}`` variables its prompt already references, so
+turing can validate that a caller supplied them before placing a call.
 
-Bolna variable rules (from the docs):
+Voice-engine variable rules (from the Bolna docs):
 - User variables use ``{variable_name}`` syntax inside the prompt.
-- System variables are auto-injected by Bolna and must NOT be treated as
+- System variables are auto-injected by the engine and must NOT be treated as
   caller-supplied.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 from functools import lru_cache
 from typing import Any
 
-# Auto-injected by Bolna; callers never provide these.
+# Auto-injected by the voice engine; callers never provide these.
 SYSTEM_VARIABLES: frozenset[str] = frozenset(
     {
         "agent_id",
@@ -68,9 +69,32 @@ def extract_prompt_variables(agent: dict[str, Any]) -> set[str]:
     return found - set(SYSTEM_VARIABLES)
 
 
-@lru_cache
 def load_variable_overrides(path: str) -> dict[str, Any]:
-    """Load the per-agent override file. Returns {} if the file is absent."""
+    """Load the per-agent override file. Returns {} if the file is absent.
+
+    Cached on the file's identity stamp, so an operator editing the override
+    file takes effect on the next call instead of requiring a process restart.
+
+    The stamp is (mtime_ns, size): nanosecond mtime rather than the float from
+    ``getmtime`` because two edits inside one filesystem timestamp tick would
+    otherwise be indistinguishable, and size as a tiebreaker for that case.
+    Two same-size edits within a single tick would still read stale — an
+    inherent limit of stat-based invalidation, and harmless for a
+    hand-maintained config file.
+    """
+    try:
+        stat = os.stat(path)
+    except OSError:
+        # Missing/unreadable: fail safe to "no overrides", same as before.
+        return {}
+    return _load_variable_overrides_cached(path, stat.st_mtime_ns, stat.st_size)
+
+
+@lru_cache(maxsize=8)
+def _load_variable_overrides_cached(
+    path: str, _mtime_ns: int, _size: int
+) -> dict[str, Any]:
+    """Read and parse the override file. The stamp args are cache keys only."""
     try:
         with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
@@ -80,6 +104,13 @@ def load_variable_overrides(path: str) -> dict[str, Any]:
     except (OSError, ValueError):
         # Malformed file: fail safe to "no overrides" rather than crash.
         return {}
+
+
+# Preserve the ``lru_cache`` surface the public name had before caching moved to
+# the inner function — callers and tests rely on ``cache_clear()``.
+load_variable_overrides.cache_clear = (  # type: ignore[attr-defined]
+    _load_variable_overrides_cached.cache_clear
+)
 
 
 def resolve_agent_variables(

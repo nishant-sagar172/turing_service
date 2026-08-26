@@ -1,7 +1,7 @@
-"""Thin async client for the Bolna voice AI API.
+"""Thin async client for the upstream voice engine (currently Bolna).
 
 Wraps a single shared ``httpx.AsyncClient`` configured with the base URL and
-Bearer auth. Bolna-specific endpoints are added as methods; a generic
+Bearer auth. Engine-specific endpoints are added as methods; a generic
 ``request`` helper backs them and can be reused for endpoints we haven't
 wrapped yet.
 
@@ -12,13 +12,37 @@ is passed, ``multipart/form-data`` when ``files=``/``data=`` are passed.
 
 from __future__ import annotations
 
+import asyncio
+import json as jsonlib
+import logging
 from typing import Any
 
 import httpx
 
+log = logging.getLogger(__name__)
 
-class BolnaError(Exception):
-    """Raised when Bolna returns a non-2xx response or is unreachable.
+# Transient-transport retry budget. Applied to idempotent requests only; see
+# ``VoiceEngineClient.request``.
+_MAX_TRANSPORT_ATTEMPTS = 3
+_RETRY_BACKOFF_S = 0.5
+
+
+def _form_value(value: Any) -> str:
+    """Render a payload value for a multipart form part.
+
+    A blanket ``str()`` is wrong here: ``str(True)`` is ``"True"``, which a
+    case-sensitive boolean parser upstream will not read as true, and
+    ``str({...})`` is a Python repr rather than JSON.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (dict, list)):
+        return jsonlib.dumps(value)
+    return str(value)
+
+
+class VoiceEngineError(Exception):
+    """Raised when the voice engine returns a non-2xx response or is unreachable.
 
     ``status_code`` is the upstream HTTP status (None on transport failure).
     ``payload`` is the parsed upstream error body when available.
@@ -31,10 +55,10 @@ class BolnaError(Exception):
         self.payload = payload
 
 
-class BolnaClient:
-    """Async wrapper around the Bolna REST API."""
+class VoiceEngineClient:
+    """Async wrapper around the upstream voice engine's REST API."""
 
-    def __init__(self, api_key: str, base_url: str = "https://api.bolna.ai",
+    def __init__(self, api_key: str, base_url: str,
                  timeout: float = 30.0) -> None:
         self._base_url = base_url.rstrip("/")
         # NOTE: no default Content-Type — httpx picks JSON vs multipart per call.
@@ -60,25 +84,44 @@ class BolnaClient:
         """Perform an authenticated request and return the parsed JSON body.
 
         Raises:
-            BolnaError: on transport failure or a non-2xx response.
+            VoiceEngineError: on transport failure or a non-2xx response.
         """
-        try:
-            response = await self._client.request(
-                method, path, json=json, params=params, data=data, files=files,
-            )
-        except httpx.RequestError as exc:  # DNS, connection, timeout, etc.
-            raise BolnaError(
-                f"Failed to reach Bolna at {self._base_url}{path}: {exc}"
-            ) from exc
+        # Retry transient transport failures for idempotent requests only. A
+        # received non-2xx is never retried (it is a real application error),
+        # and non-GET verbs are never retried because a duplicate POST could
+        # place a second patient call or create a second batch.
+        attempts = _MAX_TRANSPORT_ATTEMPTS if method.upper() == "GET" else 1
 
-        if response.is_error:
-            raise BolnaError(
-                f"Bolna returned {response.status_code} for {method} {path}",
-                status_code=response.status_code,
-                payload=_safe_json(response),
-            )
+        for attempt in range(attempts):
+            try:
+                response = await self._client.request(
+                    method, path, json=json, params=params, data=data, files=files,
+                )
+            except httpx.RequestError as exc:  # DNS, connection, timeout, etc.
+                if attempt + 1 >= attempts:
+                    raise VoiceEngineError(
+                        f"Failed to reach voice engine at {self._base_url}{path}: {exc}"
+                    ) from exc
+                await asyncio.sleep(_RETRY_BACKOFF_S * (2**attempt))
+                continue
 
-        return _safe_json(response)
+            if response.is_error:
+                error_payload = _safe_json(response)
+                log.error(
+                    "voice engine error: %s %s → %s | body: %s",
+                    method, path, response.status_code, error_payload,
+                )
+                raise VoiceEngineError(
+                    f"Voice engine returned {response.status_code} for {method} {path}",
+                    status_code=response.status_code,
+                    payload=error_payload,
+                )
+
+            return _safe_json(response)
+
+        raise VoiceEngineError(
+            f"Failed to reach voice engine at {self._base_url}{path}: retries exhausted"
+        )
 
     async def get_user(self) -> Any:
         """GET /user/me — account info. Used as the connectivity probe."""
@@ -110,16 +153,19 @@ class BolnaClient:
 
     async def create_batch(self, *, agent_id: str, csv_bytes: bytes,
                            file_name: str = "recipients.csv",
-                           from_phone_numbers: str | None = None,
+                           from_phone_numbers: list[str] | None = None,
                            retry_config: str | None = None,
                            webhook_url: str | None = None) -> Any:
         """POST /batches — create a batch by uploading a CSV (multipart).
 
-        ``from_phone_numbers`` and ``retry_config`` must already be
-        JSON-encoded strings (multipart form fields carry strings).
+        ``from_phone_numbers`` must be sent as one repeated form field per
+        number (``--form 'from_phone_numbers="+91..."'`` per Bolna's own
+        docs) — a single JSON-array-encoded field is read back literally as
+        one malformed number and rejected. ``retry_config`` is a JSON-encoded
+        string (multipart form fields carry strings).
         """
         data: dict[str, Any] = {"agent_id": agent_id}
-        if from_phone_numbers is not None:
+        if from_phone_numbers:
             data["from_phone_numbers"] = from_phone_numbers
         if retry_config is not None:
             data["retry_config"] = retry_config
@@ -131,10 +177,12 @@ class BolnaClient:
     async def schedule_batch(self, batch_id: str, payload: dict[str, Any]) -> Any:
         """POST /batches/{batch_id}/schedule — schedule a created batch.
 
-        Bolna's schedule endpoint expects multipart/form-data (NOT JSON), same
-        as create. Each field is sent as a form part via ``files={k:(None,v)}``.
+        The engine's schedule endpoint expects multipart/form-data (NOT JSON),
+        same as create. Each field is sent as a form part via
+        ``files={k:(None,v)}``.
         """
-        form = {k: (None, str(v)) for k, v in payload.items()}
+        form = {k: (None, _form_value(v)) for k, v in payload.items()}
+        log.info("schedule_batch: batch_id=%s payload=%s", batch_id, payload)
         return await self.request(
             "POST", f"/batches/{batch_id}/schedule", files=form,
         )
