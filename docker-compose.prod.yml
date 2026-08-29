@@ -1,80 +1,156 @@
+# ── Turing Service — Production Compose ─────────────────────────────────
+#
+# Self-contained production stack. Uses its own container names, networks,
+# and volumes — safe to deploy without touching local dev infra.
+#
+# Usage:
+#   cp .env.example .env.prod       # fill in production secrets
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm migrate
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#
+# All four services (postgres, redis, backend, frontend) run on an isolated
+# internal network. Only backend and frontend expose host ports.
+
 services:
+
+  # ── Infrastructure ────────────────────────────────────────────────────
   postgres:
     image: pgvector/pgvector:pg17
+    container_name: turing-prod-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${TURING_PG_USER:-turing}
-      POSTGRES_PASSWORD: ${TURING_PG_PASSWORD}
+      POSTGRES_PASSWORD: ${TURING_PG_PASSWORD:?Set TURING_PG_PASSWORD in .env.prod}
       POSTGRES_DB: ${TURING_PG_DB:-turing_db}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - turing-prod-pgdata:/var/lib/postgresql/data
+    networks:
+      - turing-prod
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${TURING_PG_USER:-turing}"]
+      test: ["CMD-SHELL", "pg_isready -U ${TURING_PG_USER:-turing} -d ${TURING_PG_DB:-turing_db}"]
       interval: 10s
       timeout: 5s
       retries: 12
 
   redis:
     image: redis:7-alpine
+    container_name: turing-prod-redis
     restart: unless-stopped
     command:
       - redis-server
-      - --save ""
-      - --appendonly "no"
-      - --requirepass "${TURING_REDIS_PASSWORD}"
+      - "--save"
+      - ""
+      - "--appendonly"
+      - "no"
+      - "--requirepass"
+      - "${TURING_REDIS_PASSWORD:?Set TURING_REDIS_PASSWORD in .env.prod}"
+    networks:
+      - turing-prod
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${TURING_REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  backend:
-    build: .
-    restart: unless-stopped
-    depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
-    environment:
-      DATABASE_URL: "postgresql+asyncpg://${TURING_PG_USER:-turing}:${TURING_PG_PASSWORD}@postgres:5432/${TURING_PG_DB:-turing_db}"
-      REDIS_URL: "redis://:${TURING_REDIS_PASSWORD}@redis:6379/0"
-      ADMIN_API_KEY: ${ADMIN_API_KEY}
-      VOICE_ENGINE_API_KEY: ${VOICE_ENGINE_API_KEY}
-      VOICE_ENGINE_BASE_URL: ${VOICE_ENGINE_BASE_URL:-https://api.bolna.ai}
-      TURING_PUBLIC_URL: ${TURING_PUBLIC_URL}
-      VOICE_WEBHOOK_ALLOWED_IPS: ${VOICE_WEBHOOK_ALLOWED_IPS:-}
-      CONSOLE_PUBLIC_URL: ${CONSOLE_PUBLIC_URL}
-      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
-      LLM_MODEL: ${LLM_MODEL:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
-      ENVIRONMENT: production
-      LOG_LEVEL: INFO
-    ports:
-      - "8005:8005"
-
-  frontend:
-    build: ./frontend
-    restart: unless-stopped
-    depends_on: [backend]
-    environment:
-      TURING_API_URL: http://backend:8005
-      TURING_ADMIN_KEY: ${ADMIN_API_KEY}
-      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD}
-      OPERATOR_SESSION_SECRET: ${OPERATOR_SESSION_SECRET}
-    ports:
-      - "3001:3001"
-
-  # One-off migration runner:
-  #   docker compose -f docker-compose.prod.yml run --rm migrate
+  # ── One-off migration runner ──────────────────────────────────────────
+  #   docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm migrate
   migrate:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: turing-prod-migrate
     profiles: [tools]
     depends_on:
       postgres: { condition: service_healthy }
     environment:
       DATABASE_URL: "postgresql+asyncpg://${TURING_PG_USER:-turing}:${TURING_PG_PASSWORD}@postgres:5432/${TURING_PG_DB:-turing_db}"
+      REDIS_URL: "redis://:${TURING_REDIS_PASSWORD}@redis:6379/0"
+      VOICE_ENGINE_API_KEY: ${VOICE_ENGINE_API_KEY:-placeholder}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-placeholder}
+    networks:
+      - turing-prod
     command: ["alembic", "upgrade", "head"]
 
+  # ── Backend (FastAPI) ─────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: turing-prod-backend
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      # Datastore
+      DATABASE_URL: "postgresql+asyncpg://${TURING_PG_USER:-turing}:${TURING_PG_PASSWORD}@postgres:5432/${TURING_PG_DB:-turing_db}"
+      REDIS_URL: "redis://:${TURING_REDIS_PASSWORD}@redis:6379/0"
+      # Auth
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?Set ADMIN_API_KEY in .env.prod}
+      # Voice engine
+      VOICE_ENGINE_API_KEY: ${VOICE_ENGINE_API_KEY:?Set VOICE_ENGINE_API_KEY in .env.prod}
+      VOICE_ENGINE_BASE_URL: ${VOICE_ENGINE_BASE_URL:-https://api.bolna.ai}
+      VOICE_ENGINE_TIMEOUT_SECONDS: ${VOICE_ENGINE_TIMEOUT_SECONDS:-30}
+      VOICE_DEFAULT_FROM_NUMBER: ${VOICE_DEFAULT_FROM_NUMBER:-}
+      # Webhooks
+      TURING_PUBLIC_URL: ${TURING_PUBLIC_URL:-}
+      VOICE_WEBHOOK_ALLOWED_IPS: ${VOICE_WEBHOOK_ALLOWED_IPS:-}
+      # Frontend / Console
+      CONSOLE_PUBLIC_URL: ${CONSOLE_PUBLIC_URL:-}
+      # LLM (call analysis)
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      # SQL Agent (optional — app starts without these)
+      SQL_AGENT_CONTROL_DB_URL: ${SQL_AGENT_CONTROL_DB_URL:-}
+      KALAAM_READONLY_DATABASE_URL: ${KALAAM_READONLY_DATABASE_URL:-}
+      # Runtime
+      ENVIRONMENT: production
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${BACKEND_PORT:-8005}:8005"
+    networks:
+      - turing-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # ── Frontend (Next.js) ────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_CONSOLE_URL: ${CONSOLE_PUBLIC_URL:-}
+    container_name: turing-prod-frontend
+    restart: unless-stopped
+    depends_on:
+      backend: { condition: service_healthy }
+    environment:
+      TURING_API_URL: http://backend:8005
+      TURING_ADMIN_KEY: ${ADMIN_API_KEY}
+      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:?Set OPERATOR_PASSWORD in .env.prod}
+      OPERATOR_SESSION_SECRET: ${OPERATOR_SESSION_SECRET:-}
+    ports:
+      - "${FRONTEND_PORT:-3001}:3001"
+    networks:
+      - turing-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+networks:
+  turing-prod:
+    driver: bridge
+
 volumes:
-  pgdata:
+  turing-prod-pgdata:

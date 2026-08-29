@@ -1,15 +1,13 @@
-# turing_service infrastructure — dedicated Postgres for turing's own records
-# (batches, calls, transcripts, request logs).
+# turing_service — local dev stack
 #
-# Host port 5433 (kalam-postgres uses 5432; docstribe-infra uses 5434).
+# Host ports: postgres 5433, redis 6380, backend 8005, frontend 3001
+# (kalam-postgres uses 5432; docstribe-infra uses 5434)
 #
-#   docker compose up -d postgres
-#   alembic upgrade head        # apply turing's schema
+#   docker compose up -d                # start everything
+#   docker compose up -d postgres redis  # infra only (run backend/frontend manually)
 
 services:
   postgres:
-    # pgvector build of Postgres 17 — the sql_agent control plane (sql_agent_db,
-    # a sibling database on this server) needs CREATE EXTENSION vector.
     image: pgvector/pgvector:pg17
     container_name: turing-postgres
     restart: unless-stopped
@@ -46,6 +44,87 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: turing-backend
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${TURING_PG_USER:-turing}:${TURING_PG_PASSWORD:-turing}@postgres:5432/${TURING_PG_DB:-turing_db}"
+      REDIS_URL: "redis://:${TURING_REDIS_PASSWORD:-turing}@redis:6379/0"
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-change-me-admin-key}
+      VOICE_ENGINE_API_KEY: ${VOICE_ENGINE_API_KEY}
+      VOICE_ENGINE_BASE_URL: ${VOICE_ENGINE_BASE_URL:-https://api.bolna.ai}
+      VOICE_ENGINE_TIMEOUT_SECONDS: ${VOICE_ENGINE_TIMEOUT_SECONDS:-30}
+      VOICE_DEFAULT_FROM_NUMBER: ${VOICE_DEFAULT_FROM_NUMBER:-}
+      TURING_PUBLIC_URL: ${TURING_PUBLIC_URL:-}
+      VOICE_WEBHOOK_ALLOWED_IPS: ${VOICE_WEBHOOK_ALLOWED_IPS:-}
+      CONSOLE_PUBLIC_URL: ${CONSOLE_PUBLIC_URL:-http://localhost:3001}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      SQL_AGENT_CONTROL_DB_URL: ${SQL_AGENT_CONTROL_DB_URL:-}
+      KALAAM_READONLY_DATABASE_URL: ${KALAAM_READONLY_DATABASE_URL:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${BACKEND_PORT:-8005}:8005"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_CONSOLE_URL: ${CONSOLE_PUBLIC_URL:-http://localhost:3001}
+        TURING_API_URL: http://backend:8005
+    container_name: turing-frontend
+    restart: unless-stopped
+    depends_on:
+      backend: { condition: service_healthy }
+    environment:
+      TURING_API_URL: http://backend:8005
+      TURING_ADMIN_KEY: ${ADMIN_API_KEY:-change-me-admin-key}
+      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:-local-dev-operator}
+      OPERATOR_SESSION_SECRET: ${OPERATOR_SESSION_SECRET:?Set OPERATOR_SESSION_SECRET in .env}
+    ports:
+      - "${FRONTEND_PORT:-3001}:3001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  # One-off migration runner:
+  #   docker compose run --rm migrate
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: turing-migrate
+    profiles: [tools]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${TURING_PG_USER:-turing}:${TURING_PG_PASSWORD:-turing}@postgres:5432/${TURING_PG_DB:-turing_db}"
+      REDIS_URL: "redis://:${TURING_REDIS_PASSWORD:-turing}@redis:6379/0"
+      VOICE_ENGINE_API_KEY: ${VOICE_ENGINE_API_KEY:-placeholder}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-placeholder}
+    command: ["alembic", "upgrade", "head"]
 
 volumes:
   turing-postgres-data:
