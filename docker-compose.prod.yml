@@ -111,7 +111,7 @@ services:
       ENVIRONMENT: production
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
-      - "${BACKEND_PORT:-8005}:8005"
+      - "127.0.0.1:8005:8005"
     networks:
       - turing-prod
     healthcheck:
@@ -138,7 +138,7 @@ services:
       OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:?Set OPERATOR_PASSWORD in .env.prod}
       OPERATOR_SESSION_SECRET: ${OPERATOR_SESSION_SECRET:-}
     ports:
-      - "${FRONTEND_PORT:-3001}:3001"
+      - "127.0.0.1:3001:3001"
     networks:
       - turing-prod
     healthcheck:
