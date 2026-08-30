@@ -14,7 +14,7 @@ ENV NEXT_PUBLIC_CONSOLE_URL=$NEXT_PUBLIC_CONSOLE_URL
 ENV TURING_API_URL=$TURING_API_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN npm run build
+RUN mkdir -p public && npm run build
 
 # ── Runtime ──────────────────────────────────────────────
 FROM node:20-alpine
