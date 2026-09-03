@@ -34,13 +34,26 @@ from app.schemas.analytics import (
 )
 
 CONNECTED = frozenset({"completed"})
-NOT_CONNECTED = frozenset({
-    "no-answer", "busy", "failed", "canceled", "cancelled",
-    "stopped", "error", "balance-low",
-})
+NOT_CONNECTED = frozenset(
+    {
+        "no-answer",
+        "busy",
+        "failed",
+        "canceled",
+        "cancelled",
+        "stopped",
+        "error",
+        "balance-low",
+    }
+)
 TERMINAL = CONNECTED | NOT_CONNECTED
 OUTCOME_BUCKETS = [
-    "booking", "escalation", "not_interested", "no_output", "follow_up", "other",
+    "booking",
+    "escalation",
+    "not_interested",
+    "no_output",
+    "follow_up",
+    "other",
     "not_reached",
 ]
 
@@ -75,7 +88,9 @@ def _volume_stats(total: int, connected: int, not_connected: int) -> CallVolumeS
     )
 
 
-def _outcome_breakdown(outcome_counts: dict[str, int], terminal: int) -> OutcomeBreakdown:
+def _outcome_breakdown(
+    outcome_counts: dict[str, int], terminal: int
+) -> OutcomeBreakdown:
     analyzed = sum(outcome_counts.values())
     coverage = round(analyzed / terminal, 4) if terminal else 0.0
 
@@ -108,27 +123,37 @@ async def _fetch_volume_duration_cost(
     retry_expr = case((Call.retry_count > 0, 1), else_=0)
     retry_count_expr = case((Call.retry_count > 0, Call.retry_count), else_=None)
 
-    row = (await session.execute(
-        select(
-            func.count().label("total"),
-            func.coalesce(func.sum(connected_expr), 0).label("connected"),
-            func.coalesce(func.sum(not_connected_expr), 0).label("not_connected"),
-            func.coalesce(func.sum(Call.cost), 0.0).label("total_cost"),
-            func.coalesce(func.avg(Call.duration), 0.0).label("avg_duration"),
-            func.coalesce(func.sum(Call.duration), 0.0).label("total_duration"),
-            func.coalesce(func.avg(connected_cost_expr), 0.0).label("avg_cost_connected"),
-            func.coalesce(func.sum(retry_expr), 0).label("calls_with_retry"),
-            func.avg(retry_count_expr).label("avg_retries"),
-        ).where(*filters)
-    )).one()
+    row = (
+        await session.execute(
+            select(
+                func.count().label("total"),
+                func.coalesce(func.sum(connected_expr), 0).label("connected"),
+                func.coalesce(func.sum(not_connected_expr), 0).label("not_connected"),
+                func.coalesce(func.sum(Call.cost), 0.0).label("total_cost"),
+                func.coalesce(func.avg(Call.duration), 0.0).label("avg_duration"),
+                func.coalesce(func.sum(Call.duration), 0.0).label("total_duration"),
+                func.coalesce(func.avg(connected_cost_expr), 0.0).label(
+                    "avg_cost_connected"
+                ),
+                func.coalesce(func.sum(retry_expr), 0).label("calls_with_retry"),
+                func.avg(retry_count_expr).label("avg_retries"),
+            ).where(*filters)
+        )
+    ).one()
 
     # percentile_cont uses a separate query (ordered-set aggregate)
-    p50_row = (await session.execute(
-        select(
-            func.percentile_cont(0.5).within_group(Call.duration.asc()).label("p50"),
-            func.percentile_cont(0.9).within_group(Call.duration.asc()).label("p90"),
-        ).where(*filters, Call.duration.isnot(None))
-    )).one()
+    p50_row = (
+        await session.execute(
+            select(
+                func.percentile_cont(0.5)
+                .within_group(Call.duration.asc())
+                .label("p50"),
+                func.percentile_cont(0.9)
+                .within_group(Call.duration.asc())
+                .label("p90"),
+            ).where(*filters, Call.duration.isnot(None))
+        )
+    ).one()
 
     return {
         "total": int(row.total),
@@ -238,37 +263,55 @@ async def get_by_agent(
     not_connected_expr = case((Call.status.in_(NOT_CONNECTED), 1), else_=0)
     connected_cost_expr = case((Call.status.in_(CONNECTED), Call.cost), else_=None)
 
-    agg_rows = (await session.execute(
-        select(
-            Call.agent_id,
-            func.count().label("total"),
-            func.coalesce(func.sum(connected_expr), 0).label("connected"),
-            func.coalesce(func.sum(not_connected_expr), 0).label("not_connected"),
-            func.coalesce(func.sum(Call.cost), 0.0).label("total_cost"),
-            func.coalesce(func.sum(Call.duration), 0.0).label("total_duration"),
-            func.coalesce(func.avg(Call.duration), 0.0).label("avg_duration"),
-            func.coalesce(func.avg(connected_cost_expr), 0.0).label("avg_cost_connected"),
-        ).where(*base).group_by(Call.agent_id)
-    )).all()
+    agg_rows = (
+        await session.execute(
+            select(
+                Call.agent_id,
+                func.count().label("total"),
+                func.coalesce(func.sum(connected_expr), 0).label("connected"),
+                func.coalesce(func.sum(not_connected_expr), 0).label("not_connected"),
+                func.coalesce(func.sum(Call.cost), 0.0).label("total_cost"),
+                func.coalesce(func.sum(Call.duration), 0.0).label("total_duration"),
+                func.coalesce(func.avg(Call.duration), 0.0).label("avg_duration"),
+                func.coalesce(func.avg(connected_cost_expr), 0.0).label(
+                    "avg_cost_connected"
+                ),
+            )
+            .where(*base)
+            .group_by(Call.agent_id)
+        )
+    ).all()
 
     if not agg_rows:
         return []
 
-    pct_rows = (await session.execute(
-        select(
-            Call.agent_id,
-            func.percentile_cont(0.5).within_group(Call.duration.asc()).label("p50"),
-            func.percentile_cont(0.9).within_group(Call.duration.asc()).label("p90"),
-        ).where(*base, Call.duration.isnot(None)).group_by(Call.agent_id)
-    )).all()
-    pct_by_agent: dict[str, tuple[Any, Any]] = {r.agent_id: (r.p50, r.p90) for r in pct_rows}
+    pct_rows = (
+        await session.execute(
+            select(
+                Call.agent_id,
+                func.percentile_cont(0.5)
+                .within_group(Call.duration.asc())
+                .label("p50"),
+                func.percentile_cont(0.9)
+                .within_group(Call.duration.asc())
+                .label("p90"),
+            )
+            .where(*base, Call.duration.isnot(None))
+            .group_by(Call.agent_id)
+        )
+    ).all()
+    pct_by_agent: dict[str, tuple[Any, Any]] = {
+        r.agent_id: (r.p50, r.p90) for r in pct_rows
+    }
 
-    outcome_rows = (await session.execute(
-        select(Call.agent_id, CallAnalysis.outcome, func.count().label("cnt"))
-        .join(CallAnalysis, Call.id == CallAnalysis.call_id)
-        .where(*base, Call.status.in_(TERMINAL))
-        .group_by(Call.agent_id, CallAnalysis.outcome)
-    )).all()
+    outcome_rows = (
+        await session.execute(
+            select(Call.agent_id, CallAnalysis.outcome, func.count().label("cnt"))
+            .join(CallAnalysis, Call.id == CallAnalysis.call_id)
+            .where(*base, Call.status.in_(TERMINAL))
+            .group_by(Call.agent_id, CallAnalysis.outcome)
+        )
+    ).all()
     outcomes_by_agent: dict[str, dict[str, int]] = {}
     for r in outcome_rows:
         outcomes_by_agent.setdefault(r.agent_id, {})[r.outcome] = r.cnt
@@ -276,26 +319,32 @@ async def get_by_agent(
     results: list[AgentStats] = []
     for row in agg_rows:
         p50, p90 = pct_by_agent.get(row.agent_id, (None, None))
-        avg_per_call = round(float(row.total_cost) / int(row.total), 4) if row.total else 0.0
+        avg_per_call = (
+            round(float(row.total_cost) / int(row.total), 4) if row.total else 0.0
+        )
         terminal = int(row.connected) + int(row.not_connected)
-        results.append(AgentStats(
-            agent_id=row.agent_id,
-            call_volume=_volume_stats(int(row.total), int(row.connected), int(row.not_connected)),
-            duration=DurationStats(
-                total_seconds=round(float(row.total_duration), 2),
-                avg_seconds=round(float(row.avg_duration), 2),
-                p50_seconds=round(float(p50), 2) if p50 is not None else None,
-                p90_seconds=round(float(p90), 2) if p90 is not None else None,
-            ),
-            cost=CostStats(
-                total=round(float(row.total_cost), 4),
-                avg_per_call=avg_per_call,
-                avg_per_connected=round(float(row.avg_cost_connected), 4),
-            ),
-            outcomes=_outcome_breakdown(
-                outcomes_by_agent.get(row.agent_id, {}), terminal
-            ),
-        ))
+        results.append(
+            AgentStats(
+                agent_id=row.agent_id,
+                call_volume=_volume_stats(
+                    int(row.total), int(row.connected), int(row.not_connected)
+                ),
+                duration=DurationStats(
+                    total_seconds=round(float(row.total_duration), 2),
+                    avg_seconds=round(float(row.avg_duration), 2),
+                    p50_seconds=round(float(p50), 2) if p50 is not None else None,
+                    p90_seconds=round(float(p90), 2) if p90 is not None else None,
+                ),
+                cost=CostStats(
+                    total=round(float(row.total_cost), 4),
+                    avg_per_call=avg_per_call,
+                    avg_per_connected=round(float(row.avg_cost_connected), 4),
+                ),
+                outcomes=_outcome_breakdown(
+                    outcomes_by_agent.get(row.agent_id, {}), terminal
+                ),
+            )
+        )
     return results
 
 
@@ -315,50 +364,76 @@ async def get_by_batch(
     connected_cost_expr = case((Call.status.in_(CONNECTED), Call.cost), else_=None)
 
     # Aggregate stats + batch metadata in one JOIN — eliminates per-batch session.get()
-    agg_rows = (await session.execute(
-        select(
-            Batch.id.label("batch_pk"),
-            Batch.voice_batch_id,
-            Batch.status.label("batch_status"),
-            Batch.scheduled_at,
-            Batch.total_count,
-            func.count().label("total"),
-            func.coalesce(func.sum(connected_expr), 0).label("connected"),
-            func.coalesce(func.sum(not_connected_expr), 0).label("not_connected"),
-            func.coalesce(func.sum(Call.cost), 0.0).label("total_cost"),
-            func.coalesce(func.sum(Call.duration), 0.0).label("total_duration"),
-            func.coalesce(func.avg(Call.duration), 0.0).label("avg_duration"),
-            func.coalesce(func.avg(connected_cost_expr), 0.0).label("avg_cost_connected"),
+    agg_rows = (
+        await session.execute(
+            select(
+                Batch.id.label("batch_pk"),
+                Batch.voice_batch_id,
+                Batch.status.label("batch_status"),
+                Batch.scheduled_at,
+                Batch.total_count,
+                func.count().label("total"),
+                func.coalesce(func.sum(connected_expr), 0).label("connected"),
+                func.coalesce(func.sum(not_connected_expr), 0).label("not_connected"),
+                func.coalesce(func.sum(Call.cost), 0.0).label("total_cost"),
+                func.coalesce(func.sum(Call.duration), 0.0).label("total_duration"),
+                func.coalesce(func.avg(Call.duration), 0.0).label("avg_duration"),
+                func.coalesce(func.avg(connected_cost_expr), 0.0).label(
+                    "avg_cost_connected"
+                ),
+            )
+            .join(Batch, Batch.id == Call.batch_id)
+            .where(*base_with_batch)
+            .group_by(
+                Batch.id,
+                Batch.voice_batch_id,
+                Batch.status,
+                Batch.scheduled_at,
+                Batch.total_count,
+            )
         )
-        .join(Batch, Batch.id == Call.batch_id)
-        .where(*base_with_batch)
-        .group_by(
-            Batch.id, Batch.voice_batch_id, Batch.status,
-            Batch.scheduled_at, Batch.total_count,
-        )
-    )).all()
+    ).all()
 
     if not agg_rows:
         return []
 
     batch_pks = [row.batch_pk for row in agg_rows]
 
-    pct_rows = (await session.execute(
-        select(
-            Call.batch_id,
-            func.percentile_cont(0.5).within_group(Call.duration.asc()).label("p50"),
-            func.percentile_cont(0.9).within_group(Call.duration.asc()).label("p90"),
-        ).where(*base_with_batch, Call.duration.isnot(None), Call.batch_id.in_(batch_pks))
-        .group_by(Call.batch_id)
-    )).all()
-    pct_by_batch: dict[uuid.UUID, tuple[Any, Any]] = {r.batch_id: (r.p50, r.p90) for r in pct_rows}
+    pct_rows = (
+        await session.execute(
+            select(
+                Call.batch_id,
+                func.percentile_cont(0.5)
+                .within_group(Call.duration.asc())
+                .label("p50"),
+                func.percentile_cont(0.9)
+                .within_group(Call.duration.asc())
+                .label("p90"),
+            )
+            .where(
+                *base_with_batch,
+                Call.duration.isnot(None),
+                Call.batch_id.in_(batch_pks),
+            )
+            .group_by(Call.batch_id)
+        )
+    ).all()
+    pct_by_batch: dict[uuid.UUID, tuple[Any, Any]] = {
+        r.batch_id: (r.p50, r.p90) for r in pct_rows
+    }
 
-    outcome_rows = (await session.execute(
-        select(Call.batch_id, CallAnalysis.outcome, func.count().label("cnt"))
-        .join(CallAnalysis, Call.id == CallAnalysis.call_id)
-        .where(*base_with_batch, Call.status.in_(TERMINAL), Call.batch_id.in_(batch_pks))
-        .group_by(Call.batch_id, CallAnalysis.outcome)
-    )).all()
+    outcome_rows = (
+        await session.execute(
+            select(Call.batch_id, CallAnalysis.outcome, func.count().label("cnt"))
+            .join(CallAnalysis, Call.id == CallAnalysis.call_id)
+            .where(
+                *base_with_batch,
+                Call.status.in_(TERMINAL),
+                Call.batch_id.in_(batch_pks),
+            )
+            .group_by(Call.batch_id, CallAnalysis.outcome)
+        )
+    ).all()
     outcomes_by_batch: dict[uuid.UUID, dict[str, int]] = {}
     for r in outcome_rows:
         outcomes_by_batch.setdefault(r.batch_id, {})[r.outcome] = r.cnt
@@ -366,29 +441,35 @@ async def get_by_batch(
     results: list[BatchStats] = []
     for row in agg_rows:
         p50, p90 = pct_by_batch.get(row.batch_pk, (None, None))
-        avg_per_call = round(float(row.total_cost) / int(row.total), 4) if row.total else 0.0
+        avg_per_call = (
+            round(float(row.total_cost) / int(row.total), 4) if row.total else 0.0
+        )
         terminal = int(row.connected) + int(row.not_connected)
-        results.append(BatchStats(
-            batch_id=row.voice_batch_id,
-            batch_status=row.batch_status,
-            scheduled_at=row.scheduled_at,
-            total_recipients=row.total_count,
-            call_volume=_volume_stats(int(row.total), int(row.connected), int(row.not_connected)),
-            duration=DurationStats(
-                total_seconds=round(float(row.total_duration), 2),
-                avg_seconds=round(float(row.avg_duration), 2),
-                p50_seconds=round(float(p50), 2) if p50 is not None else None,
-                p90_seconds=round(float(p90), 2) if p90 is not None else None,
-            ),
-            cost=CostStats(
-                total=round(float(row.total_cost), 4),
-                avg_per_call=avg_per_call,
-                avg_per_connected=round(float(row.avg_cost_connected), 4),
-            ),
-            outcomes=_outcome_breakdown(
-                outcomes_by_batch.get(row.batch_pk, {}), terminal
-            ),
-        ))
+        results.append(
+            BatchStats(
+                batch_id=row.voice_batch_id,
+                batch_status=row.batch_status,
+                scheduled_at=row.scheduled_at,
+                total_recipients=row.total_count,
+                call_volume=_volume_stats(
+                    int(row.total), int(row.connected), int(row.not_connected)
+                ),
+                duration=DurationStats(
+                    total_seconds=round(float(row.total_duration), 2),
+                    avg_seconds=round(float(row.avg_duration), 2),
+                    p50_seconds=round(float(p50), 2) if p50 is not None else None,
+                    p90_seconds=round(float(p90), 2) if p90 is not None else None,
+                ),
+                cost=CostStats(
+                    total=round(float(row.total_cost), 4),
+                    avg_per_call=avg_per_call,
+                    avg_per_connected=round(float(row.avg_cost_connected), 4),
+                ),
+                outcomes=_outcome_breakdown(
+                    outcomes_by_batch.get(row.batch_pk, {}), terminal
+                ),
+            )
+        )
     return results
 
 

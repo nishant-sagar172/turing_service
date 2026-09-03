@@ -43,14 +43,18 @@ async def hit(
 
     if redis is not None:
         try:
-            return await _redis_hit(redis, bucket=bucket, limit=limit, window_seconds=window_seconds)
+            return await _redis_hit(
+                redis, bucket=bucket, limit=limit, window_seconds=window_seconds
+            )
         except Exception as exc:
             log.warning("rate_limit Redis error, falling back to in-memory: %s", exc)
 
     return _memory_hit(bucket=bucket, limit=limit, window_seconds=window_seconds)
 
 
-async def _redis_hit(redis: Any, *, bucket: str, limit: int, window_seconds: int) -> bool:
+async def _redis_hit(
+    redis: Any, *, bucket: str, limit: int, window_seconds: int
+) -> bool:
     key = f"turing:rl:{bucket}"
     async with redis.pipeline(transaction=False) as pipe:
         await pipe.incr(key)
@@ -93,6 +97,8 @@ def _evict_stale(now: float, window_seconds: float) -> None:
     # Backstop: if a burst of unique buckets outpaces eviction, drop the
     # oldest-touched entries rather than growing without bound.
     if len(_attempts) > _MAX_BUCKETS:
-        oldest = sorted(_attempts, key=lambda k: _attempts[k][-1] if _attempts[k] else 0.0)
+        oldest = sorted(
+            _attempts, key=lambda k: _attempts[k][-1] if _attempts[k] else 0.0
+        )
         for key in oldest[: len(_attempts) - _MAX_BUCKETS]:
             del _attempts[key]

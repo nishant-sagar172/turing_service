@@ -94,7 +94,9 @@ def _coerce_cost(payload: dict[str, Any]) -> float | None:
 def _call_fields_from_execution(payload: dict[str, Any]) -> dict[str, Any]:
     tel = _telephony(payload)
     batch_run = payload.get("batch_run_details")
-    batch_run_d = cast(dict[str, Any], batch_run) if isinstance(batch_run, dict) else None
+    batch_run_d = (
+        cast(dict[str, Any], batch_run) if isinstance(batch_run, dict) else None
+    )
     retry_count = batch_run_d.get("retry_count") if batch_run_d is not None else None
     cost = _coerce_cost(payload)
     return {
@@ -140,7 +142,9 @@ async def record_call(
     )
     call = await get_call_by_voice_id(session, client_id, voice_call_id)
     if call is None:
-        logger.warning("call row for execution %s not visible after insert", voice_call_id)
+        logger.warning(
+            "call row for execution %s not visible after insert", voice_call_id
+        )
         raise RuntimeError(f"Call row for {voice_call_id} not visible after insert")
     return call
 
@@ -262,7 +266,9 @@ async def upsert_call_from_execution(
                 client_id=resolved_client_id,
                 voice_call_id=execution_id,
                 batch_id=batch.id if batch else None,
-                agent_id=str(payload.get("agent_id") or (batch.agent_id if batch else "")),
+                agent_id=str(
+                    payload.get("agent_id") or (batch.agent_id if batch else "")
+                ),
                 contact_number=extract_contact_number(payload),
                 patient_ref=extract_patient_ref(payload),
             )
@@ -272,7 +278,9 @@ async def upsert_call_from_execution(
         if call is None:
             # Lost the race and the winner's row is not visible in this
             # transaction — safe to skip; the next reconcile pass will update it.
-            logger.warning("call row for execution %s not visible after upsert", execution_id)
+            logger.warning(
+                "call row for execution %s not visible after upsert", execution_id
+            )
             return None
 
     for field, value in _call_fields_from_execution(payload).items():
@@ -289,8 +297,13 @@ async def upsert_call_from_execution(
 
 async def batch_metrics(session: AsyncSession, batch: Batch) -> dict[str, Any]:
     rows = await session.execute(
-        select(Call.status, func.count(), func.coalesce(func.sum(Call.cost), 0.0),
-               func.coalesce(func.sum(Call.duration), 0.0), func.count(Call.duration))
+        select(
+            Call.status,
+            func.count(),
+            func.coalesce(func.sum(Call.cost), 0.0),
+            func.coalesce(func.sum(Call.duration), 0.0),
+            func.count(Call.duration),
+        )
         .where(Call.batch_id == batch.id)
         .group_by(Call.status)
     )
@@ -319,5 +332,7 @@ async def batch_metrics(session: AsyncSession, batch: Batch) -> dict[str, Any]:
         "terminal": terminal,
         "success_rate": round(completed / terminal, 4) if terminal else None,
         "total_cost": round(total_cost, 4),
-        "avg_duration_seconds": round(total_duration / duration_count, 2) if duration_count else None,
+        "avg_duration_seconds": round(total_duration / duration_count, 2)
+        if duration_count
+        else None,
     }

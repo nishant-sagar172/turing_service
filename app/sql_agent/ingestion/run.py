@@ -421,7 +421,10 @@ async def _sync_relationships(
                 )
             )
             counts.created += 1
-        elif (row_existing.relationship_type, row_existing.join_hint) != (rel_type, hint):
+        elif (row_existing.relationship_type, row_existing.join_hint) != (
+            rel_type,
+            hint,
+        ):
             row_existing.relationship_type = rel_type
             row_existing.join_hint = hint
             counts.updated += 1
@@ -589,7 +592,9 @@ async def ingest_workspace(slug: str) -> IngestReport:
             report.relationships = await _sync_relationships(
                 session, workspace, spec, introspection, manual_joins, live_tables
             )
-            report.glossary = await _sync_glossary(session, workspace, spec, live_tables)
+            report.glossary = await _sync_glossary(
+                session, workspace, spec, live_tables
+            )
             report.examples = await _sync_examples(session, workspace, spec)
 
     return report
@@ -602,7 +607,9 @@ def _print_report(report: IngestReport) -> None:
             f"unchanged={counts.unchanged} {removal}={counts.removed}"
         )
 
-    print(f"INGEST workspace={report.workspace} changed={'yes' if report.changed else 'no'}")
+    print(
+        f"INGEST workspace={report.workspace} changed={'yes' if report.changed else 'no'}"
+    )
     print(line("tables:", report.tables, "deactivated"))
     print(line("columns:", report.columns, "deleted"))
     print(line("relationships:", report.relationships, "deleted"))
@@ -618,7 +625,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Ingest a workspace's schema + YAML enrichment into the control DB."
     )
-    parser.add_argument("--workspace", required=True, help="Workspace slug, e.g. kalaam")
+    parser.add_argument(
+        "--workspace", required=True, help="Workspace slug, e.g. kalaam"
+    )
     args = parser.parse_args(argv)
 
     load_dotenv(Path(__file__).resolve().parents[3] / ".env")

@@ -57,8 +57,9 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             task.add_done_callback(_background_tasks.discard)
         return response
 
-    async def _record(self, request: Request, status_code: int,
-                      latency_ms: float, request_id: str) -> None:
+    async def _record(
+        self, request: Request, status_code: int, latency_ms: float, request_id: str
+    ) -> None:
         """Best-effort insert into request_logs; never raises."""
         try:
             from app.db.models import RequestLog
@@ -86,10 +87,18 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
 
 # The only unauthenticated paths. Everything else is denied by default.
-_OPEN_PATHS = frozenset({
-    "/health", "/health/ready", "/docs", "/redoc", "/openapi.json",
-    "/v1/register", "/webhooks/voice", "/v1/portal/lookup",
-})
+_OPEN_PATHS = frozenset(
+    {
+        "/health",
+        "/health/ready",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        "/v1/register",
+        "/webhooks/voice",
+        "/v1/portal/lookup",
+    }
+)
 # Prefix-matched open paths (startswith check — covers dynamic segments).
 # /v1/claim/{token}: open so clients can reveal their key without an API key.
 _OPEN_PREFIXES: tuple[str, ...] = ("/v1/claim/",)
@@ -107,8 +116,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         if path.startswith(_ADMIN_PREFIX):
             if not admin_key_valid(request):
-                return self._deny(request, 403, "forbidden",
-                                  "Missing or invalid X-Admin-Key.")
+                return self._deny(
+                    request, 403, "forbidden", "Missing or invalid X-Admin-Key."
+                )
             return await call_next(request)
 
         api_key = request.headers.get("X-API-Key")
@@ -130,5 +140,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
     @staticmethod
-    def _deny(request: Request, status_code: int, error: str, message: str) -> JSONResponse:
+    def _deny(
+        request: Request, status_code: int, error: str, message: str
+    ) -> JSONResponse:
         return envelope(request, status_code, error, message)

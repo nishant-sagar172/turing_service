@@ -37,7 +37,9 @@ async def sync_batch_executions(
     result = await voice_engine.get_batch_executions(batch.voice_batch_id)
     items: list[dict[str, Any]] = cast(
         list[dict[str, Any]],
-        [item for item in result if isinstance(item, dict)] if isinstance(result, list) else [],
+        [item for item in result if isinstance(item, dict)]
+        if isinstance(result, list)
+        else [],
     )
 
     for item in items:
@@ -46,13 +48,16 @@ async def sync_batch_executions(
         # and every subsequent item fails too.
         try:
             item.setdefault("batch_id", batch.voice_batch_id)
-            call = await upsert_call_from_execution(session, item, client_id=batch.client_id)
+            call = await upsert_call_from_execution(
+                session, item, client_id=batch.client_id
+            )
             if call and call.status in TERMINAL:
                 background_tasks.add_task(run_analysis_for_call, str(call.id), settings)
         except Exception:
             logger.exception(
                 "skipping execution %s while syncing batch %s",
-                item.get("id"), batch.voice_batch_id,
+                item.get("id"),
+                batch.voice_batch_id,
             )
             await session.rollback()
 

@@ -24,11 +24,13 @@ class CreateBatchRequest(BaseModel):
         min_length=1,
     )
     from_phone_numbers: list[str] | None = Field(
-        default=None, description="Optional pool of caller IDs (E.164).",
+        default=None,
+        description="Optional pool of caller IDs (E.164).",
     )
     retry_config: RetryConfig | None = None
     webhook_url: str | None = Field(
-        default=None, description="Per-batch webhook for execution updates.",
+        default=None,
+        description="Per-batch webhook for execution updates.",
     )
 
     @model_validator(mode="after")
@@ -87,7 +89,9 @@ class BatchSummary(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     batch_id: str | None = None
-    internal_id: str | None = None  # turing's internal UUID; used by frontend to filter calls/analytics
+    internal_id: str | None = (
+        None  # turing's internal UUID; used by frontend to filter calls/analytics
+    )
     status: str | None = None
     scheduled_at: str | None = None
     file_name: str | None = None

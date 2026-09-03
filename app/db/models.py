@@ -82,8 +82,10 @@ class ClientApiKey(TimestampMixin, Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"),
-        nullable=False, index=True,
+        UUID(as_uuid=True),
+        ForeignKey("clients.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     key_prefix: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
@@ -105,8 +107,10 @@ class ClientConfig(TimestampMixin, Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"),
-        unique=True, nullable=False,
+        UUID(as_uuid=True),
+        ForeignKey("clients.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
     )
     visible_fields: Mapped[dict | None] = mapped_column(JSONB)
     default_from_number: Mapped[str | None] = mapped_column(String(32))
@@ -154,8 +158,10 @@ class ClientAgentConfig(TimestampMixin, Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"),
-        nullable=False, index=True,
+        UUID(as_uuid=True),
+        ForeignKey("clients.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     voice_agent_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -198,12 +204,16 @@ class ClientPhoneNumber(TimestampMixin, Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"),
-        nullable=False, index=True,
+        UUID(as_uuid=True),
+        ForeignKey("clients.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     phone_number_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("phone_number_catalog.id", ondelete="CASCADE"),
-        nullable=False, index=True,
+        UUID(as_uuid=True),
+        ForeignKey("phone_number_catalog.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
     client: Mapped[Client] = relationship(back_populates="phone_numbers")
@@ -221,7 +231,9 @@ class AgentDriftEvent(TimestampMixin, Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     client_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), index=True,
+        UUID(as_uuid=True),
+        ForeignKey("clients.id", ondelete="CASCADE"),
+        index=True,
     )
     voice_agent_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     event_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -238,7 +250,10 @@ class Batch(TimestampMixin, Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False, index=True,
+        UUID(as_uuid=True),
+        ForeignKey("clients.id"),
+        nullable=False,
+        index=True,
     )
     agent_id: Mapped[str] = mapped_column(String(64), nullable=False)
     from_number: Mapped[str | None] = mapped_column(String(32))
@@ -254,7 +269,9 @@ class Batch(TimestampMixin, Base):
     calls: Mapped[list[Call]] = relationship(back_populates="batch")
 
     __table_args__ = (
-        UniqueConstraint("client_id", "voice_batch_id", name="uq_batch_client_voice_id"),
+        UniqueConstraint(
+            "client_id", "voice_batch_id", name="uq_batch_client_voice_id"
+        ),
     )
 
 
@@ -267,7 +284,10 @@ class Call(TimestampMixin, Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False, index=True,
+        UUID(as_uuid=True),
+        ForeignKey("clients.id"),
+        nullable=False,
+        index=True,
     )
     batch_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("batches.id"), index=True
@@ -312,12 +332,17 @@ class CallAnalysis(TimestampMixin, Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     call_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("calls.id", ondelete="CASCADE"),
-        unique=True, nullable=False, index=True,
+        UUID(as_uuid=True),
+        ForeignKey("calls.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+        index=True,
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"),
-        nullable=False, index=True,
+        UUID(as_uuid=True),
+        ForeignKey("clients.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     agent_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     batch_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -347,7 +372,9 @@ class RequestLog(TimestampMixin, Base):
     )
     request_id: Mapped[str] = mapped_column(String(36), index=True, nullable=False)
     client_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("clients.id"), index=True,
+        UUID(as_uuid=True),
+        ForeignKey("clients.id"),
+        index=True,
     )
     method: Mapped[str] = mapped_column(String(8), nullable=False)
     endpoint: Mapped[str] = mapped_column(String(256), nullable=False)

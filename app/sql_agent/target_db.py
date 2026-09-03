@@ -68,7 +68,9 @@ def get_target_engine(
     calls for the same env var reuse the cached engine unchanged.
     """
     if statement_timeout_ms <= 0:
-        raise TargetDBConfigError("statement_timeout_ms must be positive (fail closed).")
+        raise TargetDBConfigError(
+            "statement_timeout_ms must be positive (fail closed)."
+        )
     engine = _engines.get(connection_env_var)
     if engine is None:
         engine = create_async_engine(

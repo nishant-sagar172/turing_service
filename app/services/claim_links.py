@@ -64,11 +64,13 @@ async def create(
         return None
 
     token = secrets.token_urlsafe(32)
-    payload = json.dumps({
-        "client_id": str(client_id),
-        "client_name": client_name,
-        "api_key": raw_key,
-    })
+    payload = json.dumps(
+        {
+            "client_id": str(client_id),
+            "client_name": client_name,
+            "api_key": raw_key,
+        }
+    )
     ttl_seconds = int(ttl_hours * 3600)
     try:
         await redis.set(_redis_key(token), payload, ex=ttl_seconds)

@@ -23,7 +23,8 @@ async def list_phone_numbers(
 
     config = await get_config(session, tenant.client_id)
     default_from_number = (
-        config.default_from_number if config and config.default_from_number
+        config.default_from_number
+        if config and config.default_from_number
         else settings.voice_default_from_number
     )
     return PhoneNumbersResponse(

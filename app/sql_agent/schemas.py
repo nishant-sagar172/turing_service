@@ -26,12 +26,27 @@ class BuildQueryRequest(BaseModel):
 
 class BuildQueryResponse(BaseModel):
     status: BuildStatus = Field(description="Handled build outcome.")
-    sql: str | None = Field(default=None, description="Validated SQL when status is built.")
+    sql: str | None = Field(
+        default=None, description="Validated SQL when status is built."
+    )
     dialect: str = Field(default="postgresql", description="SQL dialect.")
-    validated: bool = Field(default=False, description="True when static and enabled runtime validation passed.")
-    explanation: str | None = Field(default=None, description="Model explanation of the built SQL.")
-    tables_used: list[str] = Field(default_factory=list, description="Physical tables used by the SQL.")
-    confidence: float | None = Field(default=None, ge=0.0, le=1.0, description="Model confidence.")
+    validated: bool = Field(
+        default=False,
+        description="True when static and enabled runtime validation passed.",
+    )
+    explanation: str | None = Field(
+        default=None, description="Model explanation of the built SQL."
+    )
+    tables_used: list[str] = Field(
+        default_factory=list, description="Physical tables used by the SQL."
+    )
+    confidence: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Model confidence."
+    )
     critic_notes: str | None = Field(default=None, description="Semantic critic notes.")
-    clarifying_question: str | None = Field(default=None, description="Question for the caller when ambiguous.")
-    reason: str | None = Field(default=None, description="Reason for blocked or failed handled outcomes.")
+    clarifying_question: str | None = Field(
+        default=None, description="Question for the caller when ambiguous."
+    )
+    reason: str | None = Field(
+        default=None, description="Reason for blocked or failed handled outcomes."
+    )

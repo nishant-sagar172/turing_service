@@ -53,10 +53,14 @@ async def run_eval(workspace: str) -> int:
             expected = set(case.expected_tables)
             actual = set(response.tables_used)
             table_scores.append(len(expected & actual) / len(expected))
-        if response.sql and all(token.lower() in response.sql.lower() for token in case.expected_sql_shape):
+        if response.sql and all(
+            token.lower() in response.sql.lower() for token in case.expected_sql_shape
+        ):
             shape_matches += 1
 
-    average_table_overlap = sum(table_scores) / len(table_scores) if table_scores else 0.0
+    average_table_overlap = (
+        sum(table_scores) / len(table_scores) if table_scores else 0.0
+    )
     print(f"workspace: {catalog.summary()}")
     print(f"cases: {total}")
     print(f"built: {built}")

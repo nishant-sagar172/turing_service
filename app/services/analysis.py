@@ -45,6 +45,7 @@ def _is_retryable(exc: Exception) -> bool:
         "TimeoutException",
     }
 
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -143,8 +144,13 @@ _TOOL_SCHEMA: Any = {
             },
         },
         "required": [
-            "outcome", "summary", "reason", "requests",
-            "urgency", "confidence", "symptoms_reported",
+            "outcome",
+            "summary",
+            "reason",
+            "requests",
+            "urgency",
+            "confidence",
+            "symptoms_reported",
         ],
     },
 }
@@ -176,7 +182,11 @@ def _resolve_api_key(
             logger.warning(
                 "Failed to decrypt per-client LLM API key; falling back to system key"
             )
-    return settings.anthropic_api_key if provider == "anthropic" else settings.openai_api_key
+    return (
+        settings.anthropic_api_key
+        if provider == "anthropic"
+        else settings.openai_api_key
+    )
 
 
 def _build_user_content(call: Call) -> str:
@@ -250,7 +260,8 @@ async def analyze_call(
     if not api_key:
         logger.warning(
             "No LLM API key available (provider=%s) for call %s — skipping analysis",
-            provider, call.id,
+            provider,
+            call.id,
         )
         return None
 
@@ -277,12 +288,18 @@ async def analyze_call(
             if not _is_retryable(exc) or is_last:
                 logger.exception(
                     "LLM analysis failed for call %s (attempt %d/%d, retryable=%s)",
-                    call.id, attempt + 1, _MAX_ANALYSIS_ATTEMPTS, _is_retryable(exc),
+                    call.id,
+                    attempt + 1,
+                    _MAX_ANALYSIS_ATTEMPTS,
+                    _is_retryable(exc),
                 )
                 return None
             logger.warning(
                 "LLM analysis attempt %d/%d for call %s failed (%s); retrying",
-                attempt + 1, _MAX_ANALYSIS_ATTEMPTS, call.id, type(exc).__name__,
+                attempt + 1,
+                _MAX_ANALYSIS_ATTEMPTS,
+                call.id,
+                type(exc).__name__,
             )
             await asyncio.sleep(_ANALYSIS_BACKOFF_S * (2**attempt))
 
@@ -318,16 +335,16 @@ async def analyze_call(
     analysis.reason = result.get("reason") or ""
     analysis.requests = result.get("requests") or []
     analysis.urgency = urgency if urgency in URGENCY_LEVELS else None
-    analysis.confidence = float(confidence) if isinstance(confidence, (int, float)) else None
+    analysis.confidence = (
+        float(confidence) if isinstance(confidence, (int, float)) else None
+    )
     analysis.symptoms_reported = result.get("symptoms_reported") or []
     analysis.model_used = model_tag
     analysis.analyzed_at = now
     analysis.raw_llm_response = result
 
     await session.flush()
-    logger.info(
-        "Call %s analysed: outcome=%s model=%s", call.id, outcome, model_tag
-    )
+    logger.info("Call %s analysed: outcome=%s model=%s", call.id, outcome, model_tag)
     return analysis
 
 
@@ -361,14 +378,18 @@ async def classify_by_status(
 
     analysis.outcome = outcome
     analysis.summary = f"Call ended with status: {call.status}"
-    analysis.reason = f"Auto-classified from terminal status '{call.status}' (no transcript)."
+    analysis.reason = (
+        f"Auto-classified from terminal status '{call.status}' (no transcript)."
+    )
     analysis.requests = []
     analysis.model_used = "status-classifier/v1"
     analysis.analyzed_at = now
     analysis.raw_llm_response = {"source": "status_classifier", "status": call.status}
 
     await session.flush()
-    logger.info("Call %s auto-classified: status=%s outcome=%s", call.id, call.status, outcome)
+    logger.info(
+        "Call %s auto-classified: status=%s outcome=%s", call.id, call.status, outcome
+    )
     return analysis
 
 

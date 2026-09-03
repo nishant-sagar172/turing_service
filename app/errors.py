@@ -25,8 +25,9 @@ def _rid(request: Request) -> str | None:
     return getattr(request.state, "request_id", None)
 
 
-def envelope(request: Request, status_code: int, error: str, message: str,
-             detail: Any = None) -> JSONResponse:
+def envelope(
+    request: Request, status_code: int, error: str, message: str, detail: Any = None
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={
@@ -50,7 +51,9 @@ def register_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(VoiceEngineError)
-    async def _voice_engine_error(request: Request, exc: VoiceEngineError) -> JSONResponse:
+    async def _voice_engine_error(
+        request: Request, exc: VoiceEngineError
+    ) -> JSONResponse:
         # Upstream status passes through; transport failure -> 502.
         return envelope(
             request,
@@ -61,7 +64,9 @@ def register_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(StarletteHTTPException)
-    async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    async def _http_error(
+        request: Request, exc: StarletteHTTPException
+    ) -> JSONResponse:
         detail = exc.detail
         if isinstance(detail, dict) and "error" in detail:
             # Structured error raised by our own code (e.g. missing variables).
@@ -81,8 +86,9 @@ def register_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(RequestValidationError)
-    async def _validation_error(request: Request,
-                                exc: RequestValidationError) -> JSONResponse:
+    async def _validation_error(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
         return envelope(
             request,
             status_code=422,

@@ -59,10 +59,25 @@ from app.schemas.admin import (
     UpdateClientRequest,
 )
 from app.schemas.agents import AgentVariables, DriftEventResponse
-from app.schemas.analysis import CallAnalysisResult, CallDetail, CallListItem, CallListResponse
-from app.schemas.analytics import AgentStats, AnalyticsOverview, BatchStats, TimeseriesPoint
+from app.schemas.analysis import (
+    CallAnalysisResult,
+    CallDetail,
+    CallListItem,
+    CallListResponse,
+)
+from app.schemas.analytics import (
+    AgentStats,
+    AnalyticsOverview,
+    BatchStats,
+    TimeseriesPoint,
+)
 from app.schemas.common import VoiceEngineStatusResponse
-from app.services import agent_sync, analytics as analytics_svc, phone_number_sync, tenants
+from app.services import (
+    agent_sync,
+    analytics as analytics_svc,
+    phone_number_sync,
+    tenants,
+)
 from app.services import claim_links as cl
 from app.services.analysis import analyze_call as _analyze_call
 from app.services.store import get_call_by_voice_id
@@ -78,12 +93,16 @@ async def _get_client_or_404(session: AsyncSession, client_id: uuid.UUID) -> Cli
     if client is None:
         raise HTTPException(
             status_code=404,
-            detail={"error": "not_found", "message": f"No client with id '{client_id}'."},
+            detail={
+                "error": "not_found",
+                "message": f"No client with id '{client_id}'.",
+            },
         )
     return client
 
 
 # ── Client lifecycle ──────────────────────────────────────────────────────────
+
 
 @router.post("/clients", response_model=ClientSummary, status_code=201)
 async def create_client(
@@ -92,10 +111,15 @@ async def create_client(
 ) -> ClientSummary:
     try:
         client = await tenants.admin_create_client(
-            session, name=body.name, contact_email=body.contact_email, status=body.status
+            session,
+            name=body.name,
+            contact_email=body.contact_email,
+            status=body.status,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail={"error": "conflict", "message": str(exc)})
+        raise HTTPException(
+            status_code=409, detail={"error": "conflict", "message": str(exc)}
+        )
     return ClientSummary.model_validate(client, from_attributes=True)
 
 
@@ -134,7 +158,9 @@ async def update_client(
             clear_email="contact_email" in fields and fields["contact_email"] is None,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail={"error": "conflict", "message": str(exc)})
+        raise HTTPException(
+            status_code=409, detail={"error": "conflict", "message": str(exc)}
+        )
     return ClientSummary.model_validate(updated, from_attributes=True)
 
 
@@ -222,6 +248,7 @@ async def reactivate_client(
 
 # ── API keys ──────────────────────────────────────────────────────────────────
 
+
 @router.get("/clients/{client_id}/keys", response_model=list[KeySummary])
 async def list_keys(
     client_id: uuid.UUID,
@@ -231,7 +258,9 @@ async def list_keys(
     return await tenants.list_keys(session, client_id)
 
 
-@router.post("/clients/{client_id}/keys", response_model=IssueKeyResponse, status_code=201)
+@router.post(
+    "/clients/{client_id}/keys", response_model=IssueKeyResponse, status_code=201
+)
 async def issue_key(
     client_id: uuid.UUID,
     body: IssueKeyRequest,
@@ -258,6 +287,7 @@ async def revoke_key(
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
+
 
 def _config_response(config) -> ClientConfigResponse:
     if config is None:
@@ -326,7 +356,9 @@ async def update_config(
             fields["analysis_llm_api_key_enc"] = None  # explicit clear
         else:
             try:
-                fields["analysis_llm_api_key_enc"] = encrypt(raw_api_key, settings.encryption_key)
+                fields["analysis_llm_api_key_enc"] = encrypt(
+                    raw_api_key, settings.encryption_key
+                )
             except EncryptionError as exc:
                 raise HTTPException(
                     status_code=500,
@@ -338,6 +370,7 @@ async def update_config(
 
 
 # ── Admin batch listing per client ───────────────────────────────────────────
+
 
 @router.get("/clients/{client_id}/batches", response_model=list[BatchSummaryAdmin])
 async def admin_list_client_batches(
@@ -375,6 +408,7 @@ async def admin_list_client_batches(
 
 # ── Admin analytics mirrors ───────────────────────────────────────────────────
 
+
 @router.get("/clients/{client_id}/analytics/overview", response_model=AnalyticsOverview)
 async def admin_analytics_overview(
     client_id: uuid.UUID,
@@ -386,9 +420,12 @@ async def admin_analytics_overview(
 ) -> AnalyticsOverview:
     await _get_client_or_404(session, client_id)
     return await analytics_svc.get_overview(
-        session, client_id,
-        date_from=date_from, date_to=date_to,
-        agent_id=agent_id, batch_id=batch_id,
+        session,
+        client_id,
+        date_from=date_from,
+        date_to=date_to,
+        agent_id=agent_id,
+        batch_id=batch_id,
     )
 
 
@@ -402,8 +439,11 @@ async def admin_analytics_by_agent(
 ) -> list[AgentStats]:
     await _get_client_or_404(session, client_id)
     return await analytics_svc.get_by_agent(
-        session, client_id,
-        date_from=date_from, date_to=date_to, batch_id=batch_id,
+        session,
+        client_id,
+        date_from=date_from,
+        date_to=date_to,
+        batch_id=batch_id,
     )
 
 
@@ -417,12 +457,17 @@ async def admin_analytics_by_batch(
 ) -> list[BatchStats]:
     await _get_client_or_404(session, client_id)
     return await analytics_svc.get_by_batch(
-        session, client_id,
-        date_from=date_from, date_to=date_to, agent_id=agent_id,
+        session,
+        client_id,
+        date_from=date_from,
+        date_to=date_to,
+        agent_id=agent_id,
     )
 
 
-@router.get("/clients/{client_id}/analytics/timeseries", response_model=list[TimeseriesPoint])
+@router.get(
+    "/clients/{client_id}/analytics/timeseries", response_model=list[TimeseriesPoint]
+)
 async def admin_analytics_timeseries(
     client_id: uuid.UUID,
     date_from: datetime | None = Query(default=None),
@@ -434,14 +479,18 @@ async def admin_analytics_timeseries(
 ) -> list[TimeseriesPoint]:
     await _get_client_or_404(session, client_id)
     return await analytics_svc.get_timeseries(
-        session, client_id,
-        date_from=date_from, date_to=date_to,
-        agent_id=agent_id, batch_id=batch_id,
+        session,
+        client_id,
+        date_from=date_from,
+        date_to=date_to,
+        agent_id=agent_id,
+        batch_id=batch_id,
         granularity=granularity,
     )
 
 
 # ── Agents ────────────────────────────────────────────────────────────────────
+
 
 @router.get("/agents", response_model=list[CatalogAgentSummary])
 async def list_catalog_agents(
@@ -468,7 +517,9 @@ async def get_agent_variables_admin(
     session: AsyncSession = Depends(get_session),
 ) -> AgentVariables:
     """Admin-scoped variables endpoint — uses X-Admin-Key, not X-API-Key."""
-    contract = await resolve_variables(voice_engine, agent_id, settings, session=session)
+    contract = await resolve_variables(
+        voice_engine, agent_id, settings, session=session
+    )
     return AgentVariables(agent_id=agent_id, **contract)
 
 
@@ -528,6 +579,7 @@ async def patch_client_agent(
 
 # ── Drift events ──────────────────────────────────────────────────────────────
 
+
 @router.get("/clients/{client_id}/drift", response_model=list[DriftEventResponse])
 async def get_drift(
     client_id: uuid.UUID,
@@ -559,12 +611,16 @@ async def acknowledge_drift(
     if event is None or event.client_id != client_id:
         raise HTTPException(
             status_code=404,
-            detail={"error": "not_found", "message": f"No drift event with id '{event_id}'."},
+            detail={
+                "error": "not_found",
+                "message": f"No drift event with id '{event_id}'.",
+            },
         )
     event.acknowledged = True
 
 
 # ── Agent catalog sync ────────────────────────────────────────────────────────
+
 
 @router.post("/agents/sync", response_model=SyncResponse)
 async def sync_agents(
@@ -590,11 +646,13 @@ async def voice_engine_status(
         return VoiceEngineStatusResponse(
             voice_engine="error",
             base_url=voice_engine.base_url,
-            detail=str(exc) + (f" | body={exc.payload}" if exc.payload is not None else ""),
+            detail=str(exc)
+            + (f" | body={exc.payload}" if exc.payload is not None else ""),
         )
 
 
 # ── Phone number catalog ──────────────────────────────────────────────────────
+
 
 @router.get("/phone-numbers", response_model=list[PhoneNumberCatalogSummary])
 async def list_phone_number_catalog(
@@ -672,6 +730,7 @@ async def set_client_phone_numbers(
 
 # ── Admin calls ───────────────────────────────────────────────────────────────
 
+
 def _admin_call_analysis(analysis: CallAnalysis | None) -> CallAnalysisResult | None:
     if analysis is None:
         return None
@@ -710,7 +769,9 @@ async def admin_list_client_calls(
     status: str | None = Query(default=None),
     outcome: str | None = Query(default=None),
     urgency: str | None = Query(default=None),
-    q: str | None = Query(default=None, description="Substring search on contact number."),
+    q: str | None = Query(
+        default=None, description="Substring search on contact number."
+    ),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
     page: int = Query(default=1, ge=1),
@@ -741,7 +802,9 @@ async def admin_list_client_calls(
     count_query = select(func.count()).select_from(Call)
     # Eager-load `batch` alongside `analysis`: this listing pages up to 200 rows
     # and previously resolved from_number with one extra query per row (N+1).
-    page_query = select(Call).options(selectinload(Call.analysis), selectinload(Call.batch))
+    page_query = select(Call).options(
+        selectinload(Call.analysis), selectinload(Call.batch)
+    )
     if needs_analysis_join:
         count_query = count_query.join(CallAnalysis, CallAnalysis.call_id == Call.id)
         page_query = page_query.join(CallAnalysis, CallAnalysis.call_id == Call.id)
@@ -749,8 +812,7 @@ async def admin_list_client_calls(
     total = (await session.execute(count_query.where(*filters))).scalar_one()
 
     rows = await session.execute(
-        page_query
-        .where(*filters)
+        page_query.where(*filters)
         .order_by(Call.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -759,20 +821,22 @@ async def admin_list_client_calls(
 
     items: list[CallListItem] = []
     for call in calls:
-        items.append(CallListItem(
-            call_id=call.voice_call_id,
-            agent_id=call.agent_id,
-            batch_id=call.batch_id,
-            contact_number=call.contact_number,
-            from_number=call.batch.from_number if call.batch else None,
-            status=call.status,
-            duration=call.duration,
-            cost=call.cost,
-            hangup_reason=call.hangup_reason,
-            recording_url=call.recording_url,
-            created_at=call.created_at.isoformat() if call.created_at else None,
-            analysis=_admin_call_analysis(call.analysis),
-        ))
+        items.append(
+            CallListItem(
+                call_id=call.voice_call_id,
+                agent_id=call.agent_id,
+                batch_id=call.batch_id,
+                contact_number=call.contact_number,
+                from_number=call.batch.from_number if call.batch else None,
+                status=call.status,
+                duration=call.duration,
+                cost=call.cost,
+                hangup_reason=call.hangup_reason,
+                recording_url=call.recording_url,
+                created_at=call.created_at.isoformat() if call.created_at else None,
+                analysis=_admin_call_analysis(call.analysis),
+            )
+        )
 
     return CallListResponse(
         items=items,
@@ -796,9 +860,11 @@ async def admin_get_call(
             status_code=404,
             detail={"error": "not_found", "message": f"No call with id '{call_id}'."},
         )
-    analysis_row = (await session.execute(
-        select(CallAnalysis).where(CallAnalysis.call_id == call.id)
-    )).scalar_one_or_none()
+    analysis_row = (
+        await session.execute(
+            select(CallAnalysis).where(CallAnalysis.call_id == call.id)
+        )
+    ).scalar_one_or_none()
 
     return CallDetail(
         call_id=call.voice_call_id,
@@ -820,7 +886,9 @@ async def admin_get_call(
     )
 
 
-@router.post("/clients/{client_id}/calls/{call_id}/analyze", response_model=CallAnalysisResult)
+@router.post(
+    "/clients/{client_id}/calls/{call_id}/analyze", response_model=CallAnalysisResult
+)
 async def admin_analyze_call(
     client_id: uuid.UUID,
     call_id: str,
@@ -837,14 +905,20 @@ async def admin_analyze_call(
     if not call.transcript:
         raise HTTPException(
             status_code=422,
-            detail={"error": "no_transcript", "message": "Call has no transcript — analysis is not possible."},
+            detail={
+                "error": "no_transcript",
+                "message": "Call has no transcript — analysis is not possible.",
+            },
         )
     client_config = await tenants.get_config(session, client_id)
     analysis = await _analyze_call(session, call, settings, client_config)
     if analysis is None:
         raise HTTPException(
             status_code=503,
-            detail={"error": "analysis_failed", "message": "LLM analysis failed. Check API key configuration."},
+            detail={
+                "error": "analysis_failed",
+                "message": "LLM analysis failed. Check API key configuration.",
+            },
         )
     return CallAnalysisResult(
         outcome=analysis.outcome,

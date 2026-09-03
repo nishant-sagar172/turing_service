@@ -96,7 +96,9 @@ async def bootstrap() -> list[str]:
         async with engine.begin() as conn:
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await conn.run_sync(Base.metadata.create_all)
-            tables = await conn.run_sync(lambda sync_conn: _table_names(inspect(sync_conn)))
+            tables = await conn.run_sync(
+                lambda sync_conn: _table_names(inspect(sync_conn))
+            )
     finally:
         await engine.dispose()
 

@@ -56,7 +56,10 @@ async def portal_lookup(
     ):
         raise HTTPException(
             status_code=429,
-            detail={"error": "rate_limited", "message": "Too many attempts. Please try again later."},
+            detail={
+                "error": "rate_limited",
+                "message": "Too many attempts. Please try again later.",
+            },
         )
 
     result = await session.execute(

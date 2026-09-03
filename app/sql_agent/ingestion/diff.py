@@ -162,9 +162,7 @@ class DiffResult(Generic[K]):
         return bool(self.created or self.updated or self.removed)
 
 
-def diff_rows(
-    existing: Mapping[K, RowState], fresh: Mapping[K, str]
-) -> DiffResult[K]:
+def diff_rows(existing: Mapping[K, RowState], fresh: Mapping[K, str]) -> DiffResult[K]:
     """Classify ``fresh`` (key -> content hash) against ``existing`` row states."""
     created: set[K] = set()
     updated: set[K] = set()

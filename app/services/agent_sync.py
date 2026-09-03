@@ -51,7 +51,10 @@ async def sync_catalog(
 
 
 async def _upsert_agent(
-    session: AsyncSession, voice_agent_id: str, snapshot: dict[str, Any], now: datetime,
+    session: AsyncSession,
+    voice_agent_id: str,
+    snapshot: dict[str, Any],
+    now: datetime,
 ) -> None:
     result = await session.execute(
         select(AgentCatalog).where(AgentCatalog.voice_agent_id == voice_agent_id)
@@ -68,7 +71,9 @@ async def _upsert_agent(
 
 
 async def _mark_missing(
-    session: AsyncSession, seen_ids: set[str], now: datetime,
+    session: AsyncSession,
+    seen_ids: set[str],
+    now: datetime,
 ) -> list[str]:
     """Flag catalog rows the engine no longer returned. Returns their ids."""
     result = await session.execute(
@@ -105,7 +110,9 @@ async def _detect_drift(session: AsyncSession, newly_missing: list[str]) -> int:
         )
         logger.warning(
             "Agent drift: voice_agent_id=%s removed upstream while enabled "
-            "for client_id=%s", config.voice_agent_id, config.client_id,
+            "for client_id=%s",
+            config.voice_agent_id,
+            config.client_id,
         )
         count += 1
     return count
@@ -117,8 +124,10 @@ async def list_client_agents(
     """A client's enabled + still-present agents, catalog joined in."""
     result = await session.execute(
         select(ClientAgentConfig, AgentCatalog)
-        .join(AgentCatalog,
-              ClientAgentConfig.voice_agent_id == AgentCatalog.voice_agent_id)
+        .join(
+            AgentCatalog,
+            ClientAgentConfig.voice_agent_id == AgentCatalog.voice_agent_id,
+        )
         .where(
             ClientAgentConfig.client_id == client_id,
             ClientAgentConfig.enabled.is_(True),
@@ -133,8 +142,10 @@ async def is_agent_enabled(
 ) -> bool:
     result = await session.execute(
         select(ClientAgentConfig.enabled)
-        .join(AgentCatalog,
-              ClientAgentConfig.voice_agent_id == AgentCatalog.voice_agent_id)
+        .join(
+            AgentCatalog,
+            ClientAgentConfig.voice_agent_id == AgentCatalog.voice_agent_id,
+        )
         .where(
             ClientAgentConfig.client_id == client_id,
             ClientAgentConfig.voice_agent_id == voice_agent_id,
@@ -146,7 +157,9 @@ async def is_agent_enabled(
 
 
 async def set_client_agents(
-    session: AsyncSession, client_id: uuid.UUID, voice_agent_ids: list[str],
+    session: AsyncSession,
+    client_id: uuid.UUID,
+    voice_agent_ids: list[str],
 ) -> None:
     """Bulk-set a client's enabled agent ids (admin action) — replaces the set."""
     result = await session.execute(
@@ -161,7 +174,9 @@ async def set_client_agents(
     for voice_agent_id in wanted - existing.keys():
         session.add(
             ClientAgentConfig(
-                client_id=client_id, voice_agent_id=voice_agent_id, enabled=True,
+                client_id=client_id,
+                voice_agent_id=voice_agent_id,
+                enabled=True,
             )
         )
 
@@ -202,7 +217,8 @@ async def list_catalog(
 
 
 async def list_client_agent_config(
-    session: AsyncSession, client_id: uuid.UUID,
+    session: AsyncSession,
+    client_id: uuid.UUID,
 ) -> list[tuple[ClientAgentConfig, AgentCatalog | None]]:
     """All ClientAgentConfig rows for a client, LEFT-joined to the catalog.
 

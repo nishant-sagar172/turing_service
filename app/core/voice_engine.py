@@ -48,8 +48,13 @@ class VoiceEngineError(Exception):
     ``payload`` is the parsed upstream error body when available.
     """
 
-    def __init__(self, message: str, *, status_code: int | None = None,
-                 payload: Any | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        payload: Any | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.payload = payload
@@ -58,8 +63,7 @@ class VoiceEngineError(Exception):
 class VoiceEngineClient:
     """Async wrapper around the upstream voice engine's REST API."""
 
-    def __init__(self, api_key: str, base_url: str,
-                 timeout: float = 30.0) -> None:
+    def __init__(self, api_key: str, base_url: str, timeout: float = 30.0) -> None:
         self._base_url = base_url.rstrip("/")
         # NOTE: no default Content-Type — httpx picks JSON vs multipart per call.
         self._client = httpx.AsyncClient(
@@ -76,11 +80,16 @@ class VoiceEngineClient:
         """Close the underlying HTTP connection pool."""
         await self._client.aclose()
 
-    async def request(self, method: str, path: str, *,
-                      json: Any | None = None,
-                      params: dict[str, Any] | None = None,
-                      data: dict[str, Any] | None = None,
-                      files: dict[str, Any] | None = None) -> Any:
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: Any | None = None,
+        params: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+    ) -> Any:
         """Perform an authenticated request and return the parsed JSON body.
 
         Raises:
@@ -95,7 +104,12 @@ class VoiceEngineClient:
         for attempt in range(attempts):
             try:
                 response = await self._client.request(
-                    method, path, json=json, params=params, data=data, files=files,
+                    method,
+                    path,
+                    json=json,
+                    params=params,
+                    data=data,
+                    files=files,
                 )
             except httpx.RequestError as exc:  # DNS, connection, timeout, etc.
                 if attempt + 1 >= attempts:
@@ -109,7 +123,10 @@ class VoiceEngineClient:
                 error_payload = _safe_json(response)
                 log.error(
                     "voice engine error: %s %s → %s | body: %s",
-                    method, path, response.status_code, error_payload,
+                    method,
+                    path,
+                    response.status_code,
+                    error_payload,
                 )
                 raise VoiceEngineError(
                     f"Voice engine returned {response.status_code} for {method} {path}",
@@ -151,11 +168,16 @@ class VoiceEngineClient:
         """GET /executions/{execution_id} — status/transcript/outcome of a call."""
         return await self.request("GET", f"/executions/{execution_id}")
 
-    async def create_batch(self, *, agent_id: str, csv_bytes: bytes,
-                           file_name: str = "recipients.csv",
-                           from_phone_numbers: list[str] | None = None,
-                           retry_config: str | None = None,
-                           webhook_url: str | None = None) -> Any:
+    async def create_batch(
+        self,
+        *,
+        agent_id: str,
+        csv_bytes: bytes,
+        file_name: str = "recipients.csv",
+        from_phone_numbers: list[str] | None = None,
+        retry_config: str | None = None,
+        webhook_url: str | None = None,
+    ) -> Any:
         """POST /batches — create a batch by uploading a CSV (multipart).
 
         ``from_phone_numbers`` must be sent as one repeated form field per
@@ -184,7 +206,9 @@ class VoiceEngineClient:
         form = {k: (None, _form_value(v)) for k, v in payload.items()}
         log.info("schedule_batch: batch_id=%s payload=%s", batch_id, payload)
         return await self.request(
-            "POST", f"/batches/{batch_id}/schedule", files=form,
+            "POST",
+            f"/batches/{batch_id}/schedule",
+            files=form,
         )
 
     async def list_agent_batches(self, agent_id: str) -> Any:

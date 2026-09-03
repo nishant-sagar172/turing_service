@@ -62,10 +62,16 @@ async def get_agent_variables(
     if not await agent_sync.is_agent_enabled(session, tenant.client_id, agent_id):
         raise HTTPException(
             status_code=403,
-            detail={"error": "agent_not_enabled",
-                    "message": f"Agent '{agent_id}' is not enabled for this client."},
+            detail={
+                "error": "agent_not_enabled",
+                "message": f"Agent '{agent_id}' is not enabled for this client.",
+            },
         )
     contract = await resolve_variables(
-        voice_engine, agent_id, settings, session=session, client_id=tenant.client_id,
+        voice_engine,
+        agent_id,
+        settings,
+        session=session,
+        client_id=tenant.client_id,
     )
     return AgentVariables(agent_id=agent_id, **contract)

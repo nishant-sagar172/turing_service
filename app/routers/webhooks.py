@@ -32,7 +32,9 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 # (POST /v1/calls) get a per-call execution webhook. Reaching one of these
 # terminal statuses is our only signal that the batch's calls are ready to
 # pull, so we react to it here rather than requiring a manual reconcile.
-BATCH_TERMINAL_STATUSES = frozenset({"completed", "stopped", "failed", "cancelled", "canceled"})
+BATCH_TERMINAL_STATUSES = frozenset(
+    {"completed", "stopped", "failed", "cancelled", "canceled"}
+)
 
 
 def _check_source_ip(request: Request, settings: Settings) -> None:
@@ -82,13 +84,17 @@ async def _handle_batch_webhook(
     synced = 0
     if status in BATCH_TERMINAL_STATUSES:
         voice_engine = get_voice_engine(request)
-        items = await sync_batch_executions(session, voice_engine, batch, background_tasks, settings)
+        items = await sync_batch_executions(
+            session, voice_engine, batch, background_tasks, settings
+        )
         synced = len(items)
 
     await session.commit()
     logger.info(
         "Batch webhook: batch=%s status=%s synced=%d",
-        voice_batch_id, status, synced,
+        voice_batch_id,
+        status,
+        synced,
     )
     return {"received": True, "batch_id": voice_batch_id, "synced_calls": synced}
 
@@ -104,7 +110,9 @@ async def voice_webhook(
     _check_source_ip(request, settings)
 
     if not (payload.get("id") or payload.get("execution_id")):
-        return await _handle_batch_webhook(request, payload, background_tasks, session, settings)
+        return await _handle_batch_webhook(
+            request, payload, background_tasks, session, settings
+        )
 
     call = await upsert_call_from_execution(session, payload)
     if call is None:
@@ -134,11 +142,17 @@ async def voice_webhook(
 
     logger.info(
         "Voice webhook: call=%s status=%s forwarded=%s",
-        call.voice_call_id, call.status, forwarded,
+        call.voice_call_id,
+        call.status,
+        forwarded,
     )
 
     # Fire-and-forget analysis for all terminal calls.
     if call.status in TERMINAL:
         background_tasks.add_task(run_analysis_for_call, str(call.id), settings)
 
-    return {"received": True, "execution_id": call.voice_call_id, "forwarded": forwarded}
+    return {
+        "received": True,
+        "execution_id": call.voice_call_id,
+        "forwarded": forwarded,
+    }

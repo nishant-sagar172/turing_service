@@ -42,7 +42,10 @@ async def register(
     ):
         raise HTTPException(
             status_code=429,
-            detail={"error": "rate_limited", "message": "Too many registration attempts. Please try again later."},
+            detail={
+                "error": "rate_limited",
+                "message": "Too many registration attempts. Please try again later.",
+            },
         )
     await register_client(session, name=body.name, contact_email=body.contact_email)
     return RegisterResponse(

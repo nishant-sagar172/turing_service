@@ -1,6 +1,15 @@
 import json
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,7 +56,9 @@ def _encode_retry_config(retry_config: RetryConfig | None) -> str | None:
 
 
 async def _resolve_from_numbers(
-    session: AsyncSession, tenant: TenantContext, settings: Settings,
+    session: AsyncSession,
+    tenant: TenantContext,
+    settings: Settings,
     requested: list[str] | None,
 ) -> list[str] | None:
     if requested is not None:
@@ -67,8 +78,7 @@ async def _get_batch_or_404(
     if batch is None:
         raise HTTPException(
             status_code=404,
-            detail={"error": "not_found",
-                    "message": f"No batch with id '{batch_id}'."},
+            detail={"error": "not_found", "message": f"No batch with id '{batch_id}'."},
         )
     return batch
 
@@ -79,8 +89,10 @@ async def _require_agent_enabled(
     if not await agent_sync.is_agent_enabled(session, tenant.client_id, agent_id):
         raise HTTPException(
             status_code=403,
-            detail={"error": "agent_not_enabled",
-                    "message": f"Agent '{agent_id}' is not enabled for this client."},
+            detail={
+                "error": "agent_not_enabled",
+                "message": f"Agent '{agent_id}' is not enabled for this client.",
+            },
         )
 
 
@@ -99,8 +111,11 @@ async def create_batch(
     do_validate = settings.validate_agent_variables if validate is None else validate
     if do_validate:
         contract = await resolve_variables(
-            voice_engine, body.agent_id, settings,
-            session=session, client_id=tenant.client_id,
+            voice_engine,
+            body.agent_id,
+            settings,
+            session=session,
+            client_id=tenant.client_id,
         )
         row_errors: list[dict[str, object]] = []
         extra_seen: set[str] = set()
@@ -150,7 +165,8 @@ async def create_batch(
         from_number=from_numbers[0] if from_numbers else None,
         retry_config=(
             body.retry_config.model_dump(exclude_none=True)
-            if body.retry_config else None
+            if body.retry_config
+            else None
         ),
         recipients=body.recipients,
         total_count=len(body.recipients),
@@ -165,7 +181,8 @@ async def create_batch_from_csv(
     agent_id: str = Form(...),
     file: UploadFile = File(...),
     from_phone_numbers: str | None = Form(
-        default=None, description="JSON array string, e.g. [\"+91...\"].",
+        default=None,
+        description='JSON array string, e.g. ["+91..."].',
     ),
     webhook_url: str | None = Form(default=None),
     tenant: TenantContext = Depends(get_current_tenant),
@@ -248,18 +265,26 @@ async def list_batches(
     )
     batches = result.scalars().all()
     return [
-        BatchSummary.model_validate({
-            "batch_id": batch.voice_batch_id,
-            "internal_id": str(batch.id),
-            "status": batch.status,
-            "agent_id": batch.agent_id,
-            "scheduled_at": batch.scheduled_at,
-            "from_phone_numbers": [batch.from_number] if batch.from_number else None,
-            "valid_contacts": batch.valid_count,
-            "total_contacts": batch.total_count,
-            "created_at": batch.created_at.isoformat() if batch.created_at else None,
-            "updated_at": batch.updated_at.isoformat() if batch.updated_at else None,
-        })
+        BatchSummary.model_validate(
+            {
+                "batch_id": batch.voice_batch_id,
+                "internal_id": str(batch.id),
+                "status": batch.status,
+                "agent_id": batch.agent_id,
+                "scheduled_at": batch.scheduled_at,
+                "from_phone_numbers": [batch.from_number]
+                if batch.from_number
+                else None,
+                "valid_contacts": batch.valid_count,
+                "total_contacts": batch.total_count,
+                "created_at": batch.created_at.isoformat()
+                if batch.created_at
+                else None,
+                "updated_at": batch.updated_at.isoformat()
+                if batch.updated_at
+                else None,
+            }
+        )
         for batch in batches
     ]
 
@@ -280,24 +305,33 @@ async def list_agent_batches(
     history in one response.
     """
     result = await session.execute(
-        select(Batch).where(Batch.client_id == tenant.client_id, Batch.agent_id == agent_id)
+        select(Batch)
+        .where(Batch.client_id == tenant.client_id, Batch.agent_id == agent_id)
         .order_by(Batch.created_at.desc())
         .limit(limit)
     )
     batches = result.scalars().all()
     return [
-        BatchSummary.model_validate({
-            "batch_id": batch.voice_batch_id,
-            "internal_id": str(batch.id),
-            "status": batch.status,
-            "agent_id": batch.agent_id,
-            "scheduled_at": batch.scheduled_at,
-            "from_phone_numbers": [batch.from_number] if batch.from_number else None,
-            "valid_contacts": batch.valid_count,
-            "total_contacts": batch.total_count,
-            "created_at": batch.created_at.isoformat() if batch.created_at else None,
-            "updated_at": batch.updated_at.isoformat() if batch.updated_at else None,
-        })
+        BatchSummary.model_validate(
+            {
+                "batch_id": batch.voice_batch_id,
+                "internal_id": str(batch.id),
+                "status": batch.status,
+                "agent_id": batch.agent_id,
+                "scheduled_at": batch.scheduled_at,
+                "from_phone_numbers": [batch.from_number]
+                if batch.from_number
+                else None,
+                "valid_contacts": batch.valid_count,
+                "total_contacts": batch.total_count,
+                "created_at": batch.created_at.isoformat()
+                if batch.created_at
+                else None,
+                "updated_at": batch.updated_at.isoformat()
+                if batch.updated_at
+                else None,
+            }
+        )
         for batch in batches
     ]
 
@@ -352,7 +386,9 @@ async def get_batch_executions(
     """Also the reconcile path: every execution the engine returns is
     upserted here, covering any missed webhooks."""
     batch = await _get_batch_or_404(session, tenant, batch_id)
-    items = await sync_batch_executions(session, voice_engine, batch, background_tasks, settings)
+    items = await sync_batch_executions(
+        session, voice_engine, batch, background_tasks, settings
+    )
     return [ExecutionResponse.model_validate(item) for item in items]
 
 

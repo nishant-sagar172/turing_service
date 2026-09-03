@@ -31,7 +31,9 @@ WORKSPACES_DIR = Path(__file__).resolve().parents[1] / "workspaces"
 
 _ENV_VAR_NAME_RE = re.compile(r"[A-Z][A-Z0-9_]*")
 _LEADING_IDENT_RE = re.compile(r"^[\"'`]?([A-Za-z_][A-Za-z0-9_]*)")
-_TABLE_COLUMN_REF_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\b")
+_TABLE_COLUMN_REF_RE = re.compile(
+    r"\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\b"
+)
 
 
 class WorkspaceFileError(ValueError):

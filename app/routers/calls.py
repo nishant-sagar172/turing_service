@@ -15,11 +15,21 @@ from app.core.voice_engine import VoiceEngineClient, VoiceEngineError
 from app.db.models import Call, CallAnalysis
 from app.db.session import get_session
 from app.dependencies import get_current_tenant, get_voice_engine
-from app.schemas.analysis import CallAnalysisResult, CallDetail, CallListItem, CallListResponse
+from app.schemas.analysis import (
+    CallAnalysisResult,
+    CallDetail,
+    CallListItem,
+    CallListResponse,
+)
 from app.schemas.calls import MakeCallRequest, MakeCallResponse, StopCallResponse
 from app.services import agent_sync
 from app.services.analysis import analyze_call
-from app.services.store import TERMINAL_STATUSES, get_call_by_voice_id, record_call, upsert_call_from_execution
+from app.services.store import (
+    TERMINAL_STATUSES,
+    get_call_by_voice_id,
+    record_call,
+    upsert_call_from_execution,
+)
 from app.services.tenants import get_config
 from app.services.variables import check, resolve_variables
 
@@ -32,8 +42,10 @@ async def _require_agent_enabled(
     if not await agent_sync.is_agent_enabled(session, tenant.client_id, agent_id):
         raise HTTPException(
             status_code=403,
-            detail={"error": "agent_not_enabled",
-                    "message": f"Agent '{agent_id}' is not enabled for this client."},
+            detail={
+                "error": "agent_not_enabled",
+                "message": f"Agent '{agent_id}' is not enabled for this client.",
+            },
         )
 
 
@@ -73,8 +85,11 @@ async def make_call(
     do_validate = settings.validate_agent_variables if validate is None else validate
     if do_validate and body.user_data:
         contract = await resolve_variables(
-            voice_engine, body.agent_id, settings,
-            session=session, client_id=tenant.client_id,
+            voice_engine,
+            body.agent_id,
+            settings,
+            session=session,
+            client_id=tenant.client_id,
         )
         provided = set(body.user_data.keys())
         missing, extra = check(provided, contract)
@@ -131,7 +146,9 @@ async def list_calls(
     status: str | None = Query(default=None),
     outcome: str | None = Query(default=None),
     urgency: str | None = Query(default=None),
-    q: str | None = Query(default=None, description="Substring search on contact number."),
+    q: str | None = Query(
+        default=None, description="Substring search on contact number."
+    ),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
     page: int = Query(default=1, ge=1),
@@ -171,8 +188,7 @@ async def list_calls(
     total = total_row.scalar_one()
 
     rows = await session.execute(
-        page_query
-        .where(*filters)
+        page_query.where(*filters)
         .order_by(Call.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -201,23 +217,30 @@ async def get_call(
     if call is None:
         raise HTTPException(
             status_code=404,
-            detail={"error": "not_found",
-                    "message": f"No call with execution id '{execution_id}'."},
+            detail={
+                "error": "not_found",
+                "message": f"No call with execution id '{execution_id}'.",
+            },
         )
 
     if call.status not in TERMINAL_STATUSES:
         try:
             payload = await voice_engine.get_execution(execution_id)
             if isinstance(payload, dict):
-                call = await upsert_call_from_execution(
-                    session, payload, client_id=tenant.client_id
-                ) or call
+                call = (
+                    await upsert_call_from_execution(
+                        session, payload, client_id=tenant.client_id
+                    )
+                    or call
+                )
         except VoiceEngineError:
             pass
 
-    analysis_row = (await session.execute(
-        select(CallAnalysis).where(CallAnalysis.call_id == call.id)
-    )).scalar_one_or_none()
+    analysis_row = (
+        await session.execute(
+            select(CallAnalysis).where(CallAnalysis.call_id == call.id)
+        )
+    ).scalar_one_or_none()
 
     from_number: str | None = None
     if call.batch_id is not None:
@@ -255,8 +278,10 @@ async def stop_call(
     if call is None:
         raise HTTPException(
             status_code=404,
-            detail={"error": "not_found",
-                    "message": f"No call with execution id '{execution_id}'."},
+            detail={
+                "error": "not_found",
+                "message": f"No call with execution id '{execution_id}'.",
+            },
         )
 
     result = await voice_engine.stop_call(execution_id)
@@ -278,15 +303,19 @@ async def analyze_call_endpoint(
     if call is None:
         raise HTTPException(
             status_code=404,
-            detail={"error": "not_found",
-                    "message": f"No call with execution id '{execution_id}'."},
+            detail={
+                "error": "not_found",
+                "message": f"No call with execution id '{execution_id}'.",
+            },
         )
 
     if not call.transcript:
         raise HTTPException(
             status_code=422,
-            detail={"error": "no_transcript",
-                    "message": "Call has no transcript — analysis is not possible."},
+            detail={
+                "error": "no_transcript",
+                "message": "Call has no transcript — analysis is not possible.",
+            },
         )
 
     client_config = await get_config(session, tenant.client_id)
@@ -294,8 +323,10 @@ async def analyze_call_endpoint(
     if analysis is None:
         raise HTTPException(
             status_code=503,
-            detail={"error": "analysis_failed",
-                    "message": "LLM analysis failed. Check API key configuration."},
+            detail={
+                "error": "analysis_failed",
+                "message": "LLM analysis failed. Check API key configuration.",
+            },
         )
 
     result = CallAnalysisResult.from_model(analysis)

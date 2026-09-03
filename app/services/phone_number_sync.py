@@ -73,7 +73,9 @@ async def _mark_missing(session: AsyncSession, seen: set[str], now: datetime) ->
             row.is_present = False
             row.last_synced_at = now
             count += 1
-            logger.warning("Phone number removed from voice engine: %s", row.phone_number)
+            logger.warning(
+                "Phone number removed from voice engine: %s", row.phone_number
+            )
     return count
 
 
@@ -137,9 +139,7 @@ async def unknown_phone_number_ids(
     if not phone_number_ids:
         return []
     result = await session.execute(
-        select(PhoneNumberCatalog.id).where(
-            PhoneNumberCatalog.id.in_(phone_number_ids)
-        )
+        select(PhoneNumberCatalog.id).where(PhoneNumberCatalog.id.in_(phone_number_ids))
     )
     known = {row for (row,) in result.all()}
     return [pid for pid in phone_number_ids if pid not in known]

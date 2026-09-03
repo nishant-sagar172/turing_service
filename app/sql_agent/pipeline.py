@@ -140,7 +140,15 @@ async def build_query(
             dialect=catalog.dialect,
             reason=enhanced.reason or "Write intent is not allowed.",
         )
-        _audit(catalog, question, enhanced.enhanced_question, response, audit_client_id, settings, 0)
+        _audit(
+            catalog,
+            question,
+            enhanced.enhanced_question,
+            response,
+            audit_client_id,
+            settings,
+            0,
+        )
         return response
 
     ambiguity = await _ambiguity_check(enhanced.enhanced_question, catalog, settings)
@@ -151,10 +159,20 @@ async def build_query(
             clarifying_question=ambiguity.clarifying_question,
             reason=ambiguity.reason,
         )
-        _audit(catalog, question, enhanced.enhanced_question, response, audit_client_id, settings, 0)
+        _audit(
+            catalog,
+            question,
+            enhanced.enhanced_question,
+            response,
+            audit_client_id,
+            settings,
+            0,
+        )
         return response
 
-    selected_tables = await _select_tables(enhanced.enhanced_question, catalog, settings)
+    selected_tables = await _select_tables(
+        enhanced.enhanced_question, catalog, settings
+    )
     if not selected_tables:
         response = BuildQueryResponse(
             status="clarify_needed",
@@ -162,7 +180,15 @@ async def build_query(
             clarifying_question="Which part of Kalaam should this question use?",
             reason="no_known_tables_selected",
         )
-        _audit(catalog, question, enhanced.enhanced_question, response, audit_client_id, settings, 0)
+        _audit(
+            catalog,
+            question,
+            enhanced.enhanced_question,
+            response,
+            audit_client_id,
+            settings,
+            0,
+        )
         return response
 
     selected_schema = await _build_selected_schema(
@@ -185,7 +211,9 @@ async def build_query(
             first_candidate=candidate,
         )
 
-    critic = await _critic(enhanced.enhanced_question, selected_schema, candidate.sql, settings)
+    critic = await _critic(
+        enhanced.enhanced_question, selected_schema, candidate.sql, settings
+    )
     repair_attempts = 0
     current_sql = candidate.sql
     explanation = candidate.explanation
@@ -499,7 +527,9 @@ async def _explain_if_enabled(
 
 def _seed_target_connection(catalog: SchemaCatalog, settings: SqlAgentSettings) -> None:
     if catalog.connection_env_var == "KALAAM_READONLY_DATABASE_URL":
-        os.environ.setdefault(catalog.connection_env_var, settings.kalaam_readonly_database_url)
+        os.environ.setdefault(
+            catalog.connection_env_var, settings.kalaam_readonly_database_url
+        )
 
 
 def _pruned_columns(
@@ -513,9 +543,7 @@ def _pruned_columns(
         if item.table not in selected:
             continue
         valid_columns = [
-            column
-            for column in item.columns
-            if column in catalog.allowlist[item.table]
+            column for column in item.columns if column in catalog.allowlist[item.table]
         ]
         if valid_columns:
             pruned[item.table] = sorted(set(valid_columns))

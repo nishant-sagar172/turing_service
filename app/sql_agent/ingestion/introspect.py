@@ -150,8 +150,12 @@ async def introspect_target(connection_env_var: str) -> IntrospectionResult:
         pk_rows = (await conn.execute(_PK_SQL, params)).all()
         fk_rows = (await conn.execute(_FK_SQL, params)).all()
 
-    pk_columns = {(str(r.schema_name), str(r.table_name), str(r.column_name)) for r in pk_rows}
-    fk_columns = {(str(r.from_schema), str(r.from_table), str(r.from_column)) for r in fk_rows}
+    pk_columns = {
+        (str(r.schema_name), str(r.table_name), str(r.column_name)) for r in pk_rows
+    }
+    fk_columns = {
+        (str(r.from_schema), str(r.from_table), str(r.from_column)) for r in fk_rows
+    }
     table_keys = {(str(r.schema_name), str(r.table_name)) for r in table_rows}
 
     columns_by_table: dict[tuple[str, str], list[IntrospectedColumn]] = {}
@@ -175,7 +179,9 @@ async def introspect_target(connection_env_var: str) -> IntrospectionResult:
             schema_name=str(r.schema_name),
             table_name=str(r.table_name),
             row_count_estimate=int(r.row_count_estimate),
-            columns=tuple(columns_by_table.get((str(r.schema_name), str(r.table_name)), ())),
+            columns=tuple(
+                columns_by_table.get((str(r.schema_name), str(r.table_name)), ())
+            ),
         )
         for r in table_rows
     )
@@ -219,7 +225,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Dry-run introspection of a workspace's target DB (summary only)."
     )
-    parser.add_argument("--workspace", required=True, help="Workspace slug, e.g. kalaam")
+    parser.add_argument(
+        "--workspace", required=True, help="Workspace slug, e.g. kalaam"
+    )
     args = parser.parse_args(argv)
 
     load_dotenv(Path(__file__).resolve().parents[3] / ".env")

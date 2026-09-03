@@ -95,7 +95,9 @@ def guard_sql(
     limited = _enforce_limit(expression, default_row_limit)
 
     reference_index = _build_reference_index(limited, allowlist, default_schema)
-    columns_used = _validate_columns(limited, allowlist, reference_index, default_schema)
+    columns_used = _validate_columns(
+        limited, allowlist, reference_index, default_schema
+    )
     return GuardResult(
         sql=limited.sql(dialect="postgres"),
         tables_used=tuple(sorted(reference_index.physical_tables)),
@@ -105,7 +107,9 @@ def guard_sql(
 
 def _parse_single_statement(sql: str) -> exp.Expression:
     try:
-        expressions = [item for item in sqlglot.parse(sql, read="postgres") if item is not None]
+        expressions = [
+            item for item in sqlglot.parse(sql, read="postgres") if item is not None
+        ]
     except ParseError as exc:
         raise GuardError(GuardErrorCode.PARSE_ERROR, str(exc)) from exc
     if len(expressions) != 1:

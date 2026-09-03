@@ -113,7 +113,9 @@ def _load_allowlist(
                 raise SchemaContextError(f"{path} has a non-string column name.")
             columns.add(column_name.lower())
         if not columns:
-            raise SchemaContextError(f"{path} has an empty column set for {table_name}.")
+            raise SchemaContextError(
+                f"{path} has an empty column set for {table_name}."
+            )
         allowlist[table_name.lower()] = frozenset(columns)
 
     if not allowlist:

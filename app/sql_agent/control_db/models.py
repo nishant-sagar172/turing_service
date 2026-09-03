@@ -109,7 +109,10 @@ class TableMeta(TimestampMixin, Base):
     __tablename__ = "sql_agent_tables"
     __table_args__ = (
         UniqueConstraint(
-            "workspace_id", "schema_name", "table_name", name="uq_sql_agent_tables_identity"
+            "workspace_id",
+            "schema_name",
+            "table_name",
+            name="uq_sql_agent_tables_identity",
         ),
     )
 
@@ -142,7 +145,9 @@ class ColumnMeta(TimestampMixin, Base):
 
     __tablename__ = "sql_agent_columns"
     __table_args__ = (
-        UniqueConstraint("table_id", "column_name", name="uq_sql_agent_columns_identity"),
+        UniqueConstraint(
+            "table_id", "column_name", name="uq_sql_agent_columns_identity"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

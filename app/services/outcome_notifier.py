@@ -69,13 +69,15 @@ async def forward_outcome(
         if response.is_error:
             logger.warning(
                 "Client callback returned %s for call %s",
-                response.status_code, outcome.get("turing_call_id"),
+                response.status_code,
+                outcome.get("turing_call_id"),
             )
             return False
         return True
     except httpx.HTTPError as exc:
         logger.warning(
             "Client callback failed for call %s: %s",
-            outcome.get("turing_call_id"), exc,
+            outcome.get("turing_call_id"),
+            exc,
         )
         return False

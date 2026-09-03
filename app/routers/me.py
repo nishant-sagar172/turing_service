@@ -17,7 +17,12 @@ from app.auth import TenantContext
 from app.db.models import Client
 from app.db.session import get_session
 from app.dependencies import get_current_tenant
-from app.schemas.admin import ClientConfigResponse, IssueKeyRequest, IssueKeyResponse, KeySummary
+from app.schemas.admin import (
+    ClientConfigResponse,
+    IssueKeyRequest,
+    IssueKeyResponse,
+    KeySummary,
+)
 from app.schemas.me import MeResponse
 from app.services import tenants
 
@@ -31,7 +36,10 @@ async def get_me(
 ) -> MeResponse:
     client = await session.get(Client, tenant.client_id)
     if client is None:
-        raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Client not found."})
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "not_found", "message": "Client not found."},
+        )
 
     keys = await tenants.list_keys(session, tenant.client_id)
     active_count = sum(1 for k in keys if k.status == "active")
@@ -86,7 +94,10 @@ async def issue_my_key(
 ) -> IssueKeyResponse:
     client = await session.get(Client, tenant.client_id)
     if client is None:
-        raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Client not found."})
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "not_found", "message": "Client not found."},
+        )
     raw_key, key_row = await tenants.issue_key(session, client, label=body.label)
     return IssueKeyResponse(key_id=key_row.id, api_key=raw_key)
 

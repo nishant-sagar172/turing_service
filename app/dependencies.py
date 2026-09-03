@@ -30,7 +30,10 @@ def get_current_tenant(request: Request) -> TenantContext:
     if tenant is None:
         raise HTTPException(
             status_code=401,
-            detail={"error": "unauthorized", "message": "Missing or invalid X-API-Key."},
+            detail={
+                "error": "unauthorized",
+                "message": "Missing or invalid X-API-Key.",
+            },
         )
     return cast(TenantContext, tenant)
 

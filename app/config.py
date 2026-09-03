@@ -27,7 +27,9 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8005
 
-    voice_engine_api_key: str = Field(..., description="Voice engine API key (Bearer token).")
+    voice_engine_api_key: str = Field(
+        ..., description="Voice engine API key (Bearer token)."
+    )
     voice_engine_base_url: str = Field(default="https://api.bolna.ai")
     voice_engine_timeout_seconds: float = Field(default=30.0)
     voice_default_from_number: str | None = Field(
@@ -44,7 +46,8 @@ class Settings(BaseSettings):
     )
 
     admin_api_key: str = Field(
-        ..., description="Operator credential presented in X-Admin-Key for the "
+        ...,
+        description="Operator credential presented in X-Admin-Key for the "
         "/v1/admin/* surface. Not a tenant identity.",
     )
 
@@ -130,8 +133,8 @@ class Settings(BaseSettings):
     encryption_key: str | None = Field(
         default=None,
         description="Fernet key (base64, 32 bytes) used to encrypt per-client LLM API keys "
-        "stored in client_config. Generate with: python -c \"from cryptography.fernet import "
-        "Fernet; print(Fernet.generate_key().decode())\"",
+        'stored in client_config. Generate with: python -c "from cryptography.fernet import '
+        'Fernet; print(Fernet.generate_key().decode())"',
     )
 
     @property

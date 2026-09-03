@@ -64,7 +64,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logging.basicConfig(level=settings.log_level.upper())
     logger.info(
         "Starting %s (env=%s) -> voice engine %s | DB %s",
-        settings.app_name, settings.environment, settings.voice_engine_base_url,
+        settings.app_name,
+        settings.environment,
+        settings.voice_engine_base_url,
         settings.database_url.split("@")[-1],
     )
 
@@ -78,6 +80,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.redis_url:
         try:
             import redis.asyncio as aioredis
+
             app.state.redis = aioredis.from_url(
                 settings.redis_url, decode_responses=True
             )
@@ -134,10 +137,10 @@ def create_app() -> FastAPI:
 
     try:
         from app.routers import sql_agent
+
         app.include_router(sql_agent.router, prefix="/v1")
     except Exception:
         logger.info("SQL Builder Agent disabled (dependencies not configured)")
-
 
     return app
 

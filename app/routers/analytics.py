@@ -37,9 +37,12 @@ async def overview(
     session: AsyncSession = Depends(get_session),
 ) -> AnalyticsOverview:
     return await svc.get_overview(
-        session, tenant.client_id,
-        date_from=date_from, date_to=date_to,
-        agent_id=agent_id, batch_id=batch_id,
+        session,
+        tenant.client_id,
+        date_from=date_from,
+        date_to=date_to,
+        agent_id=agent_id,
+        batch_id=batch_id,
     )
 
 
@@ -52,8 +55,11 @@ async def by_agent(
     session: AsyncSession = Depends(get_session),
 ) -> list[AgentStats]:
     return await svc.get_by_agent(
-        session, tenant.client_id,
-        date_from=date_from, date_to=date_to, batch_id=batch_id,
+        session,
+        tenant.client_id,
+        date_from=date_from,
+        date_to=date_to,
+        batch_id=batch_id,
     )
 
 
@@ -66,8 +72,11 @@ async def by_batch(
     session: AsyncSession = Depends(get_session),
 ) -> list[BatchStats]:
     return await svc.get_by_batch(
-        session, tenant.client_id,
-        date_from=date_from, date_to=date_to, agent_id=agent_id,
+        session,
+        tenant.client_id,
+        date_from=date_from,
+        date_to=date_to,
+        agent_id=agent_id,
     )
 
 
@@ -82,8 +91,11 @@ async def timeseries(
     session: AsyncSession = Depends(get_session),
 ) -> list[TimeseriesPoint]:
     return await svc.get_timeseries(
-        session, tenant.client_id,
-        date_from=date_from, date_to=date_to,
-        agent_id=agent_id, batch_id=batch_id,
+        session,
+        tenant.client_id,
+        date_from=date_from,
+        date_to=date_to,
+        agent_id=agent_id,
+        batch_id=batch_id,
         granularity=granularity,
     )

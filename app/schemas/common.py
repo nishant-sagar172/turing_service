@@ -11,7 +11,9 @@ class HealthResponse(BaseModel):
 
 
 class VoiceEngineStatusResponse(BaseModel):
-    voice_engine: str = Field(description="'ok' if the engine responded successfully, else 'error'.")
+    voice_engine: str = Field(
+        description="'ok' if the engine responded successfully, else 'error'."
+    )
     base_url: str
     account: dict[str, Any] | None = None
     detail: str | None = None

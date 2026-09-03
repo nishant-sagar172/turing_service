@@ -80,7 +80,9 @@ def main(argv: list[str] | None = None) -> int:
         description="Generate the committed column allowlist for a workspace's "
         "target DB (read-only structural introspection)."
     )
-    parser.add_argument("--workspace", required=True, help="Workspace slug, e.g. kalaam")
+    parser.add_argument(
+        "--workspace", required=True, help="Workspace slug, e.g. kalaam"
+    )
     args = parser.parse_args(argv)
 
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")

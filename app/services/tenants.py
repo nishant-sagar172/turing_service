@@ -33,7 +33,9 @@ async def get_client(session: AsyncSession, client_id: uuid.UUID) -> Client | No
     return await session.get(Client, client_id)
 
 
-async def list_clients(session: AsyncSession, status: str | None = None) -> list[Client]:
+async def list_clients(
+    session: AsyncSession, status: str | None = None
+) -> list[Client]:
     stmt = select(Client).order_by(Client.created_at.desc())
     if status:
         stmt = stmt.where(Client.status == status)
@@ -49,7 +51,10 @@ async def register_client(
     if existing is not None:
         return existing
     client = Client(
-        name=name, slug=_slugify(name), contact_email=contact_email, status="pending",
+        name=name,
+        slug=_slugify(name),
+        contact_email=contact_email,
+        status="pending",
     )
     session.add(client)
     await session.flush()
@@ -57,13 +62,20 @@ async def register_client(
 
 
 async def admin_create_client(
-    session: AsyncSession, *, name: str, contact_email: str | None, status: str = "pending"
+    session: AsyncSession,
+    *,
+    name: str,
+    contact_email: str | None,
+    status: str = "pending",
 ) -> Client:
     """Admin-side create — raises ValueError if name already exists."""
     if await get_client_by_name(session, name) is not None:
         raise ValueError(f"Client '{name}' already exists.")
     client = Client(
-        name=name, slug=_slugify(name), contact_email=contact_email, status=status,
+        name=name,
+        slug=_slugify(name),
+        contact_email=contact_email,
+        status=status,
     )
     session.add(client)
     await session.flush()
@@ -97,7 +109,9 @@ async def delete_client(session: AsyncSession, client: Client) -> None:
     await session.execute(delete(Batch).where(Batch.client_id == client.id))
     # request_logs.client_id has no ON DELETE cascade — null it out to preserve audit history.
     await session.execute(
-        update(RequestLog).where(RequestLog.client_id == client.id).values(client_id=None)
+        update(RequestLog)
+        .where(RequestLog.client_id == client.id)
+        .values(client_id=None)
     )
     await session.delete(client)
     invalidate_cache()
@@ -108,8 +122,11 @@ async def _issue_key(
 ) -> tuple[str, ClientApiKey]:
     raw, prefix, digest = generate_api_key()
     key_row = ClientApiKey(
-        client_id=client.id, key_hash=digest, key_prefix=prefix,
-        label=label, status="active",
+        client_id=client.id,
+        key_hash=digest,
+        key_prefix=prefix,
+        label=label,
+        status="active",
     )
     session.add(key_row)
     await session.flush()
@@ -178,7 +195,9 @@ def revoke_key(key: ClientApiKey) -> None:
     invalidate_cache(key.key_hash)
 
 
-async def get_config(session: AsyncSession, client_id: uuid.UUID) -> ClientConfig | None:
+async def get_config(
+    session: AsyncSession, client_id: uuid.UUID
+) -> ClientConfig | None:
     result = await session.execute(
         select(ClientConfig).where(ClientConfig.client_id == client_id)
     )
@@ -201,6 +220,8 @@ async def update_config(
 ) -> ClientConfig:
     config = await get_or_create_config(session, client_id)
     for key, value in fields.items():
-        setattr(config, key, value)  # None is intentional — explicit null clears the column
+        setattr(
+            config, key, value
+        )  # None is intentional — explicit null clears the column
     await session.flush()
     return config

@@ -74,7 +74,8 @@ class MakeCallResponse(BaseModel):
     message: str | None = None
     status: str | None = Field(default=None, description="e.g. 'queued'.")
     execution_id: str | None = Field(
-        default=None, description="Track the call via GET /calls/{execution_id}.",
+        default=None,
+        description="Track the call via GET /calls/{execution_id}.",
     )
     warnings: list[str] = Field(
         default_factory=list,

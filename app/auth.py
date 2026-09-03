@@ -124,7 +124,9 @@ async def resolve_api_key(session: AsyncSession, raw_key: str) -> TenantContext 
             continue
         if client.status != "active":
             raise ClientInactiveError(client.status)
-        tenant = TenantContext(client_id=client.id, name=client.name, status=client.status)
+        tenant = TenantContext(
+            client_id=client.id, name=client.name, status=client.status
+        )
         api_key_row.last_used_at = datetime.now(timezone.utc)
         await session.commit()
         _cache_put(digest, tenant)
