@@ -178,3 +178,15 @@ mypy app/
 - Test the happy path and the most likely failure mode. Don't test framework behavior.
 - Run tests before pushing: `pytest`.
 - Never mock the database in integration tests — use a real test database.
+- **Never run tests against the production database.** Always use a dedicated test database.
+- Never write tests that delete, truncate, or corrupt data. Tests must clean up after themselves using transactions or fixtures — not destructive operations.
+
+---
+
+## Database Safety
+
+- **Never read, modify, delete, or run any query against the database without the user's explicit permission.**
+- Never run raw SQL that alters schema, drops tables, truncates, or modifies data outside of Alembic migrations.
+- Never write code that bulk-updates or bulk-deletes records without the user reviewing and approving the exact operation.
+- Never connect to or interact with the production database for debugging, testing, or exploration unless the user explicitly instructs it.
+- If a task requires a database change, describe what will change and wait for approval before executing.
