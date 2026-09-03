@@ -56,12 +56,12 @@ jobs:
             sleep 15
 
             echo "==> Service status:"
-            docker compose -f docker-compose.prod.yml ps
+            docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 
             # Verify backend is healthy
             if ! curl -sf http://localhost:8005/health > /dev/null; then
               echo "ERROR: Backend health check failed!"
-              docker compose -f docker-compose.prod.yml logs --tail=50 backend
+              docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail=50 backend
               exit 1
             fi
 
