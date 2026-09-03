@@ -1,0 +1,68 @@
+name: Deploy to GCP
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install ruff mypy
+      - run: ruff check app/
+      - run: ruff format --check app/
+
+  deploy:
+    name: Deploy to VM
+    needs: lint
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.GCP_VM_HOST }}
+          username: ${{ secrets.GCP_VM_USER }}
+          key: ${{ secrets.GCP_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -e
+            cd ~/turing_service
+
+            echo "==> Pulling latest code..."
+            git pull origin main
+
+            echo "==> Building images..."
+            docker compose -f docker-compose.prod.yml --env-file .env.prod build
+
+            echo "==> Running migrations..."
+            docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm migrate
+
+            echo "==> Restarting services..."
+            docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+
+            echo "==> Waiting for health checks..."
+            sleep 15
+
+            echo "==> Service status:"
+            docker compose -f docker-compose.prod.yml ps
+
+            # Verify backend is healthy
+            if ! curl -sf http://localhost:8005/health > /dev/null; then
+              echo "ERROR: Backend health check failed!"
+              docker compose -f docker-compose.prod.yml logs --tail=50 backend
+              exit 1
+            fi
+
+            echo "==> Deployment complete!"
