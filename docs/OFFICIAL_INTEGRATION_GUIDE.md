@@ -1,12 +1,12 @@
-# turing_service — Client Integration Guide
+# turing_service — Official Integration Guide
 
 This guide is for developers integrating **your** system with turing, the
 voice-calling micro-service that places outbound AI voice campaigns
 ("batches") on your behalf and reports outcomes back to you.
 
-Scope: this guide covers **registration, authentication, agents, and
-batches** — the campaign-placement flow. Single-call endpoints are not
-covered here.
+Scope: this guide covers **registration, authentication, agents, single
+calls, batches, analytics, and self-serve management** — everything you
+need from onboarding to production.
 
 ---
 
@@ -32,7 +32,7 @@ returns `403 agent_not_enabled`, not `404` — see §5 and §6.
 ## 2. Base URL
 
 ```
-https://<your-turing-host>/v1
+https://turing.docstribe.com/v1
 ```
 
 All endpoints below are relative to this base except registration, which is
@@ -40,7 +40,8 @@ also under `/v1` (see below), and the outcome webhook, which is not under
 `/v1` at all.
 
 The full auto-generated OpenAPI schema is browsable, unauthenticated, at
-`<host>/docs` (Swagger UI) and `<host>/openapi.json` — use it to cross-check
+`https://turing.docstribe.com/docs` (Swagger UI) and
+`https://turing.docstribe.com/openapi.json` — use it to cross-check
 exact field types if anything here seems ambiguous.
 
 ---
@@ -53,13 +54,20 @@ mint your own key.
 1. **Register:**
 
    ```bash
-   curl -X POST https://<host>/v1/register \
+   curl -X POST https://turing.docstribe.com/v1/register \
      -H "Content-Type: application/json" \
      -d '{"name": "Your Company", "contact_email": "eng@yourcompany.com"}'
    ```
 
+   | Field | Required | Notes |
+   |---|---|---|
+   | `name` | yes | 1–128 characters |
+   | `contact_email` | no | Optional (up to 256 characters). Useful for operator follow-up. |
+
+   **Response (`201`):**
+
    ```json
-   { "client_id": "b3f1...-uuid", "status": "pending" }
+   { "status": "pending", "message": "Registration received — an operator will review your request." }
    ```
 
    Registering twice with the same `name` returns the same pending record
@@ -81,6 +89,58 @@ mint your own key.
 Until approved, no key exists and every `/v1/*` call you make will fail
 authentication.
 
+### Claim links — one-click onboarding
+
+If turing's operator shares a claim link instead of a manual handoff, the
+flow is:
+
+1. **Peek** (safe for URL previews / unfurlers):
+
+   ```bash
+   curl https://turing.docstribe.com/v1/claim/{token}
+   ```
+
+   ```json
+   { "client_name": "Your Company", "expires_in_seconds": 3540 }
+   ```
+
+   Returns the client name and remaining TTL. Does **not** consume the link.
+
+2. **Burn** (one-time — the link is destroyed on success):
+
+   ```bash
+   curl -X POST https://turing.docstribe.com/v1/claim/{token}
+   ```
+
+   ```json
+   { "client_name": "Your Company", "api_key": "tk_xxxx..." }
+   ```
+
+   Returns the raw API key **once**. Store it immediately — the token is
+   deleted and cannot be used again.
+
+Both endpoints are unauthenticated. If the token is expired, already used,
+or invalid, you get `404` — the response is identical regardless of the
+reason, so there is no way to enumerate valid tokens.
+
+### Portal lookup — recover access
+
+If you've lost your API key but know your registered name and email:
+
+```bash
+curl -X POST https://turing.docstribe.com/v1/portal/lookup \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Your Company", "email": "eng@yourcompany.com"}'
+```
+
+```json
+{ "key_id": "uuid", "api_key": "tk_xxxx..." }
+```
+
+Both `name` and `email` must match (case-insensitive) and your client must
+be `active`. If either doesn't match, or your client is pending/suspended,
+you get `404` — intentionally generic. Rate-limited per source IP.
+
 ---
 
 ## 4. Authentication
@@ -95,7 +155,7 @@ X-API-Key: tk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 |---|---|
 | Header missing | `401 unauthorized` |
 | Key invalid/unknown | `401 unauthorized` |
-| Key valid, but your client is suspended | `403 forbidden` |
+| Key valid, but your client is not active (pending, suspended, or rejected) | `403 forbidden` ("Client is not active") |
 
 There is no session or token expiry to manage — every request is
 authenticated independently. If your key is ever compromised, ask turing's
@@ -144,7 +204,7 @@ only ever see agents that have been explicitly enabled for you.
 ### `GET /v1/agents`
 
 ```bash
-curl https://<host>/v1/agents -H "X-API-Key: $KEY"
+curl https://turing.docstribe.com/v1/agents -H "X-API-Key: $KEY"
 ```
 
 ```json
@@ -169,7 +229,7 @@ needs — every `required` variable **must** be present per recipient, or your
 batch is rejected before anything is placed.
 
 ```bash
-curl https://<host>/v1/agents/37768781.../variables -H "X-API-Key: $KEY"
+curl https://turing.docstribe.com/v1/agents/37768781.../variables -H "X-API-Key: $KEY"
 ```
 
 ```json
@@ -191,6 +251,31 @@ curl https://<host>/v1/agents/37768781.../variables -H "X-API-Key: $KEY"
 `403 agent_not_enabled` here means the same as elsewhere: this agent isn't
 yours to use.
 
+### `GET /v1/agents/drift` — detect removed agents
+
+Lists agents that were enabled for your client but have since disappeared
+from the voice engine (renamed, deleted, or unconfigured upstream).
+
+```bash
+curl https://turing.docstribe.com/v1/agents/drift -H "X-API-Key: $KEY"
+```
+
+```json
+[
+  {
+    "id": "...",
+    "voice_agent_id": "37768781-...",
+    "event_type": "agent_missing",
+    "detail": "Agent no longer found in voice engine catalog",
+    "acknowledged": false,
+    "created_at": "2026-08-15T..."
+  }
+]
+```
+
+Use this to detect if an agent you rely on has been removed or renamed. An
+empty list means all your agents are healthy.
+
 ---
 
 ## 7. Phone numbers
@@ -198,14 +283,14 @@ yours to use.
 ### `GET /v1/phone-numbers`
 
 ```bash
-curl https://<host>/v1/phone-numbers -H "X-API-Key: $KEY"
+curl https://turing.docstribe.com/v1/phone-numbers -H "X-API-Key: $KEY"
 ```
 
 ```json
 {
   "default_from_number": "+91XXXXXXXXXX",
   "phone_numbers": [
-    { "id": "...", "phone_number": "+91XXXXXXXXXX", "agent_id": "...", "rented": true }
+    { "phone_number": "+91XXXXXXXXXX" }
   ]
 }
 ```
@@ -214,22 +299,97 @@ curl https://<host>/v1/phone-numbers -H "X-API-Key: $KEY"
 `from_phone_numbers` on a batch — either your client's configured default, or
 the service-wide fallback. You rarely need to set this explicitly.
 
-> There is currently no self-service endpoint for you to set your own
-> `default_from_number` or `webhook_url` (§10) — these are configured for you
-> by turing's operator on request. If you need either changed, ask them.
+> There is currently no self-service endpoint for you to **set** your own
+> `default_from_number` or `webhook_url` (§11) — these are configured for you
+> by turing's operator on request. If you need either changed, ask them. You
+> **can** read your current config (including whether a webhook secret is set)
+> via `GET /v1/me/config` (§13).
 
 ---
 
-## 8. Batches — placing a campaign
+## 8. Single calls
+
+For one-off calls (not part of a batch campaign), use the calls endpoint
+directly.
+
+### `POST /v1/calls` — make a single call
+
+```bash
+curl -X POST https://turing.docstribe.com/v1/calls \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "37768781-4fc4-4df2-a80f-a847b6dad8d2",
+    "recipient_phone_number": "+919876543210",
+    "user_data": {
+      "patient_name": "Asha Rao",
+      "doctors_name": "Dr. Mehta",
+      "Follow_Up_Date": "2026-07-20"
+    }
+  }'
+```
+
+**Request fields:**
+
+| Field | Required | Notes |
+|---|---|---|
+| `agent_id` | yes | Must be enabled for your client |
+| `recipient_phone_number` | yes | E.164 format |
+| `from_phone_number` | no | Caller ID override. Omit to use default. |
+| `user_data` | no | Object of prompt variables for this call |
+| `scheduled_at` | no | ISO 8601 for scheduling |
+| `retry_config` | no | Same structure as batch retry config |
+| `bypass_call_guardrails` | no | Skip voice engine calling-time guardrail checks (e.g. do-not-call windows). Default `false`. |
+
+**Response (`201`):**
+
+```json
+{
+  "execution_id": "exec_xyz",
+  "status": "queued",
+  "message": "Call placed successfully",
+  "warnings": []
+}
+```
+
+`execution_id` may be `null` if the voice engine accepted the request but
+hasn't assigned an execution id yet (e.g. scheduled calls). Poll
+`GET /v1/calls` to pick it up once it's available.
+
+### `GET /v1/calls` — list calls
+
+```bash
+curl "https://turing.docstribe.com/v1/calls?page=1&page_size=50" \
+  -H "X-API-Key: $KEY"
+```
+
+Query params: `agent_id`, `batch_id`, `status`, `outcome`, `urgency`, `q`,
+`date_from`, `date_to`, `page`, `page_size`.
+
+### `GET /v1/calls/{execution_id}` — call details
+
+Returns full call record including transcript, analysis, extracted data,
+recording URL, cost, duration, `patient_ref` (if set), `retry_count`, and
+`error_message` (if the call failed).
+
+### `POST /v1/calls/{execution_id}/stop` — stop in-flight call
+
+### `POST /v1/calls/{execution_id}/analyze` — run LLM analysis
+
+Triggers (or re-runs) LLM-based analysis on a completed call. Returns
+outcome classification, summary, urgency, confidence, and extracted data.
+
+---
+
+## 9. Batches — placing a campaign
 
 A batch is one agent called against a list of recipients. There are two ways
 to create one: a **JSON list** (recommended — turing converts it to CSV for
 you) or a **raw CSV upload**.
 
-### 8.1 `POST /v1/batches` — create from JSON
+### 9.1 `POST /v1/batches` — create from JSON
 
 ```bash
-curl -X POST https://<host>/v1/batches \
+curl -X POST https://turing.docstribe.com/v1/batches \
   -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
   -d '{
     "agent_id": "37768781-4fc4-4df2-a80f-a847b6dad8d2",
@@ -266,10 +426,10 @@ curl -X POST https://<host>/v1/batches \
 > second destination.** By default turing tells the voice engine to send
 > execution updates to its own receiver (`/webhooks/voice`), which is how
 > turing populates `GET .../executions`, keeps its own records current, and
-> forwards you the signed outcome described in §10. If you set `webhook_url`
+> forwards you the signed outcome described in §11. If you set `webhook_url`
 > yourself, the voice engine sends its **raw, unsigned** execution payload
 > **directly to your URL instead** — turing never receives it for that batch.
-> Concretely, if you set this: you will *not* get turing's signed §10 push for
+> Concretely, if you set this: you will *not* get turing's signed §11 push for
 > this batch's calls, and turing's own DB won't reflect new statuses until you
 > next call `GET /v1/batches/{batch_id}/executions` (which still works — it
 > polls the voice engine directly, independent of any webhook). Only set this
@@ -326,13 +486,13 @@ doesn't reference. `batch_id` is what you use for every endpoint below.
 > `GET /v1/batches/by-agent/{agent_id}` for a batch you already recognize, or
 > maintain your own client-side ledger of submitted requests.
 
-### 8.2 `POST /v1/batches/upload` — create from a CSV file
+### 9.2 `POST /v1/batches/upload` — create from a CSV file
 
 Same effect as above, but you supply a CSV directly instead of a JSON list —
 useful for very large recipient lists. `multipart/form-data`:
 
 ```bash
-curl -X POST https://<host>/v1/batches/upload \
+curl -X POST https://turing.docstribe.com/v1/batches/upload \
   -H "X-API-Key: $KEY" \
   -F "agent_id=37768781-4fc4-4df2-a80f-a847b6dad8d2" \
   -F "file=@recipients.csv" \
@@ -346,13 +506,13 @@ curl -X POST https://<host>/v1/batches/upload \
 | `agent_id` | yes | Must be enabled for your client |
 | `file` | yes | CSV file, UTF-8, comma-delimited, header row required |
 | `from_phone_numbers` | no | JSON array string, e.g. `["+91..."]` |
-| `webhook_url` | no | Same replaces-turing behavior described in §8.1 — leave unset unless intentional |
+| `webhook_url` | no | Same replaces-turing behavior described in §9.1 — leave unset unless intentional |
 
 CSV requirements:
 - A header row with a `contact_number` column (E.164 format).
 - Any other column becomes a prompt variable, matched by column name.
 
-**Response** — same shape as §8.1 (`201`), but **`warnings` is always
+**Response** — same shape as §9.1 (`201`), but **`warnings` is always
 empty** here:
 
 ```json
@@ -366,12 +526,12 @@ instead of a `422` up front). Prefer the JSON endpoint when you want the
 pre-flight check; use upload for bulk lists you've already validated on your
 side.
 
-### 8.3 `POST /v1/batches/{batch_id}/schedule`
+### 9.3 `POST /v1/batches/{batch_id}/schedule`
 
 Delay a created batch to a future time instead of running immediately.
 
 ```bash
-curl -X POST https://<host>/v1/batches/b_abc123/schedule \
+curl -X POST https://turing.docstribe.com/v1/batches/b_abc123/schedule \
   -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
   -d '{"scheduled_at": "2026-07-20T09:30:00+00:00", "bypass_call_guardrails": false}'
 ```
@@ -385,10 +545,10 @@ curl -X POST https://<host>/v1/batches/b_abc123/schedule \
 { "message": "Batch scheduled.", "state": "scheduled" }
 ```
 
-### 8.4 `GET /v1/batches/{batch_id}` — status
+### 9.4 `GET /v1/batches/{batch_id}` — status
 
 ```bash
-curl https://<host>/v1/batches/b_abc123 -H "X-API-Key: $KEY"
+curl https://turing.docstribe.com/v1/batches/b_abc123 -H "X-API-Key: $KEY"
 ```
 
 ```json
@@ -409,16 +569,30 @@ curl https://<host>/v1/batches/b_abc123 -H "X-API-Key: $KEY"
 once terminal (`completed`/`stopped`/`failed`/`deleted`) it's served straight
 from turing's own record.
 
-### 8.5 `GET /v1/batches/by-agent/{agent_id}` — list your batches for an agent
+### 9.5 `GET /v1/batches` — list all your batches
 
 ```bash
-curl https://<host>/v1/batches/by-agent/37768781... -H "X-API-Key: $KEY"
+curl "https://turing.docstribe.com/v1/batches?status=in_progress" -H "X-API-Key: $KEY"
 ```
+
+Returns up to **200** batches for your client, newest first. Optional query
+params: `agent_id` (filter by agent) and `status` (filter by batch status).
+There is no pagination — if you have more than 200 batches, only the most
+recent 200 are returned.
+
+### 9.6 `GET /v1/batches/by-agent/{agent_id}` — list your batches for an agent
+
+```bash
+curl https://turing.docstribe.com/v1/batches/by-agent/37768781... -H "X-API-Key: $KEY"
+```
+
+Optional query param: `limit` (default **200**, range 1–500).
 
 ```json
 [
   {
     "batch_id": "b_abc123",
+    "internal_id": "5b0e9390-4d07-43b7-aba8-cfcf1099fe11",
     "status": "completed",
     "agent_id": "37768781-4fc4-4df2-a80f-a847b6dad8d2",
     "scheduled_at": null,
@@ -433,14 +607,14 @@ curl https://<host>/v1/batches/by-agent/37768781... -H "X-API-Key: $KEY"
 
 Returns only **your** batches for that agent, newest first — this reads
 turing's own database, not the upstream engine, so it's fast and correctly
-scoped even though the upstream account is shared across all clients. Note
-this list is not paginated — for accounts with a very large batch history,
-expect a proportionally large response.
+scoped even though the upstream account is shared across all clients.
+`internal_id` is turing's own UUID for the batch (used by the frontend to
+link calls and analytics); `batch_id` is the voice engine's id.
 
-### 8.6 `GET /v1/batches/{batch_id}/executions` — per-call results
+### 9.7 `GET /v1/batches/{batch_id}/executions` — per-call results
 
 ```bash
-curl https://<host>/v1/batches/b_abc123/executions -H "X-API-Key: $KEY"
+curl https://turing.docstribe.com/v1/batches/b_abc123/executions -H "X-API-Key: $KEY"
 ```
 
 ```json
@@ -459,14 +633,14 @@ curl https://<host>/v1/batches/b_abc123/executions -H "X-API-Key: $KEY"
 ```
 
 This is also your **reconcile path** — call it any time to pull the latest
-state for every call in the batch, independent of whether the webhook (§10)
+state for every call in the batch, independent of whether the webhook (§11)
 fired successfully. Safe to poll periodically (e.g. every few minutes while
 a batch is active) as a backstop.
 
-### 8.7 `GET /v1/batches/{batch_id}/metrics` — aggregate stats
+### 9.8 `GET /v1/batches/{batch_id}/metrics` — aggregate stats
 
 ```bash
-curl https://<host>/v1/batches/b_abc123/metrics -H "X-API-Key: $KEY"
+curl https://turing.docstribe.com/v1/batches/b_abc123/metrics -H "X-API-Key: $KEY"
 ```
 
 ```json
@@ -488,51 +662,72 @@ curl https://<host>/v1/batches/b_abc123/metrics -H "X-API-Key: $KEY"
 Computed from turing's own stored call records, not a live upstream call —
 cheap to call frequently.
 
-### 8.8 `POST /v1/batches/{batch_id}/stop`
+### 9.9 `POST /v1/batches/{batch_id}/stop`
 
 Halts a queued or running batch.
 
 ```bash
-curl -X POST https://<host>/v1/batches/b_abc123/stop -H "X-API-Key: $KEY"
+curl -X POST https://turing.docstribe.com/v1/batches/b_abc123/stop -H "X-API-Key: $KEY"
 ```
 
-### 8.9 `DELETE /v1/batches/{batch_id}`
+### 9.10 `DELETE /v1/batches/{batch_id}`
 
 Removes the batch on the voice engine. turing retains your historical record
 (status, metrics, call history) regardless.
 
 ```bash
-curl -X DELETE https://<host>/v1/batches/b_abc123 -H "X-API-Key: $KEY"
+curl -X DELETE https://turing.docstribe.com/v1/batches/b_abc123 -H "X-API-Key: $KEY"
 ```
 
 ---
 
-## 9. Endpoint summary
+## 10. Endpoint summary
 
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/v1/register` | Register your client (no key needed) |
-| GET | `/v1/agents` | List agents enabled for you |
-| GET | `/v1/agents/{agent_id}/variables` | Required/optional prompt variables |
-| GET | `/v1/phone-numbers` | Available caller IDs + your default |
-| POST | `/v1/batches` | Create a batch from JSON recipients |
-| POST | `/v1/batches/upload` | Create a batch from a CSV file |
-| POST | `/v1/batches/{batch_id}/schedule` | Schedule a created batch |
-| GET | `/v1/batches/{batch_id}` | Batch status |
-| GET | `/v1/batches/by-agent/{agent_id}` | Your batches for an agent |
-| GET | `/v1/batches/{batch_id}/executions` | Per-call results (also reconcile) |
-| GET | `/v1/batches/{batch_id}/metrics` | Aggregate campaign stats |
-| POST | `/v1/batches/{batch_id}/stop` | Stop a running batch |
-| DELETE | `/v1/batches/{batch_id}` | Delete a batch |
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/v1/register` | None | Register your client |
+| GET | `/v1/claim/{token}` | None | Peek at claim link |
+| POST | `/v1/claim/{token}` | None | Burn claim & get API key |
+| POST | `/v1/portal/lookup` | None | Portal login via name+email |
+| GET | `/v1/me` | Key | Your client profile |
+| GET | `/v1/me/config` | Key | Your webhook & default config |
+| GET | `/v1/me/keys` | Key | List your API keys |
+| POST | `/v1/me/keys` | Key | Create a new API key |
+| DELETE | `/v1/me/keys/{key_id}` | Key | Revoke an API key |
+| GET | `/v1/agents` | Key | List agents enabled for you |
+| GET | `/v1/agents/{agent_id}/variables` | Key | Required/optional prompt variables |
+| GET | `/v1/agents/drift` | Key | Detect removed/missing agents |
+| GET | `/v1/phone-numbers` | Key | Available caller IDs + your default |
+| POST | `/v1/calls` | Key | Make a single call |
+| GET | `/v1/calls` | Key | List calls (paginated) |
+| GET | `/v1/calls/{execution_id}` | Key | Call details + transcript |
+| POST | `/v1/calls/{execution_id}/stop` | Key | Stop in-flight call |
+| POST | `/v1/calls/{execution_id}/analyze` | Key | Run LLM analysis on call |
+| GET | `/v1/batches` | Key | List all your batches |
+| POST | `/v1/batches` | Key | Create batch from JSON |
+| POST | `/v1/batches/upload` | Key | Create batch from CSV |
+| POST | `/v1/batches/{batch_id}/schedule` | Key | Schedule a created batch |
+| GET | `/v1/batches/{batch_id}` | Key | Batch status |
+| GET | `/v1/batches/by-agent/{agent_id}` | Key | Your batches for an agent |
+| GET | `/v1/batches/{batch_id}/executions` | Key | Per-call results (reconcile) |
+| GET | `/v1/batches/{batch_id}/metrics` | Key | Aggregate campaign stats |
+| POST | `/v1/batches/{batch_id}/stop` | Key | Stop a running batch |
+| DELETE | `/v1/batches/{batch_id}` | Key | Delete a batch |
+| GET | `/v1/analytics/overview` | Key | Overall call stats |
+| GET | `/v1/analytics/by-agent` | Key | Stats grouped by agent |
+| GET | `/v1/analytics/by-batch` | Key | Stats grouped by batch |
+| GET | `/v1/analytics/timeseries` | Key | Time-series call data |
+| POST | `/v1/sql-agent/query` | Key | Natural-language SQL queries (optional) |
 
 ---
 
-## 10. Receiving outcomes — your webhook endpoint
+## 11. Receiving outcomes — your webhook endpoint
 
 Ask turing's operator to set your `webhook_url` (and a `webhook_secret`) on
-your client config. Once set, turing will `POST` a lean outcome to that URL
-every time a call in one of your batches reaches a new state — you don't
-need to poll (though §8.6 is there as a backstop).
+your client config. You can verify what's configured via
+`GET /v1/me/config` (§13). Once set, turing will `POST` a lean outcome to
+that URL every time a call in one of your batches reaches a new state — you
+don't need to poll (though §9.7 is there as a backstop).
 
 ### Payload
 
@@ -597,7 +792,7 @@ the comparison).
 
 - Delivery is best-effort with **no retry at all** — a single attempt per
   event. If your endpoint is down, slow, or errors, turing logs it and moves
-  on; that outcome update is not redelivered. Use §8.6
+  on; that outcome update is not redelivered. Use §9.7
   (`GET .../executions`) as a periodic reconcile poll so a missed webhook
   never means missed data — treat the webhook as a low-latency notification,
   not your source of truth.
@@ -609,11 +804,105 @@ the comparison).
 
 ---
 
-## 11. Worked end-to-end flow
+## 12. Analytics
+
+Query your call data across agents, batches, and time ranges.
+
+### `GET /v1/analytics/overview`
+
+```bash
+curl "https://turing.docstribe.com/v1/analytics/overview?date_from=2026-08-01&date_to=2026-08-31" \
+  -H "X-API-Key: $KEY"
+```
+
+Returns: total calls, completed, failed, total cost, average duration, etc.
+for the date range.
+
+Query params: `date_from`, `date_to`, `agent_id`, `batch_id` (all optional).
+
+### `GET /v1/analytics/by-agent`
+
+Same filters, but results grouped per agent.
+
+### `GET /v1/analytics/by-batch`
+
+Same filters, but results grouped per batch.
+
+### `GET /v1/analytics/timeseries`
+
+Returns data points over time. Additional param: `granularity=day|week`.
+
+---
+
+## 13. Self-serve management
+
+Once authenticated, you can manage your own profile and API keys.
+
+### `GET /v1/me` — your client profile
+
+```bash
+curl https://turing.docstribe.com/v1/me -H "X-API-Key: $KEY"
+```
+
+```json
+{
+  "client_id": "b3f1...-uuid",
+  "name": "Your Company",
+  "slug": "your-company",
+  "contact_email": "eng@yourcompany.com",
+  "status": "active",
+  "created_at": "2026-08-01T...",
+  "approved_at": "2026-08-01T...",
+  "active_key_count": 2
+}
+```
+
+### `GET /v1/me/config` — your webhook & default config
+
+```bash
+curl https://turing.docstribe.com/v1/me/config -H "X-API-Key: $KEY"
+```
+
+```json
+{
+  "default_from_number": "+91XXXXXXXXXX",
+  "webhook_url": "https://your-backend.example.com/turing/callback",
+  "webhook_secret_set": true,
+  "visible_fields": null,
+  "settings": null
+}
+```
+
+`webhook_secret_set` tells you whether a signing secret is configured (the
+actual secret is never returned). If you need to change any of these values,
+ask turing's operator — there is no self-service write endpoint.
+
+### `GET /v1/me/keys` — list your API keys
+
+Returns all keys (prefix + label + status + last used). The raw key is never
+shown again after issuance.
+
+### `POST /v1/me/keys` — create a new API key (`201`)
+
+```bash
+curl -X POST https://turing.docstribe.com/v1/me/keys \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"label": "production-backend"}'
+```
+
+Returns the raw key once. Store it securely.
+
+### `DELETE /v1/me/keys/{key_id}` — revoke a key
+
+Immediately invalidates the key. Cannot be undone.
+
+---
+
+## 14. Worked end-to-end flow
 
 ```bash
 KEY="tk_your_api_key"
-HOST="https://<host>"
+HOST="https://turing.docstribe.com"
 
 # 1. Discover your enabled agents
 curl $HOST/v1/agents -H "X-API-Key: $KEY"
@@ -636,5 +925,41 @@ curl $HOST/v1/batches/<batch_id>/metrics -H "X-API-Key: $KEY"
 ```
 
 Meanwhile, your webhook endpoint receives a signed outcome POST for each call
-as it completes — no polling required for real-time updates, but §4 and §8.6
-are there if you need them.
+as it completes — no polling required for real-time updates, but §4 and §9.7 are there
+if you need them.
+
+---
+
+## 15. SQL Builder Agent (optional)
+
+If enabled for your client, the SQL Builder Agent converts natural-language
+questions into validated PostgreSQL queries against a configured data source.
+
+### `POST /v1/sql-agent/query`
+
+```bash
+curl -X POST https://turing.docstribe.com/v1/sql-agent/query \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"question": "How many patients visited last week?", "workspace": "kalaam"}'
+```
+
+**Request fields:**
+
+| Field | Required | Notes |
+|---|---|---|
+| `question` | yes | Natural-language question |
+| `workspace` | no | Target data source (defaults to `"kalaam"`) |
+
+**Response:**
+
+```json
+{
+  "status": "success",
+  "query": "SELECT COUNT(*) FROM patient_visits WHERE created_at >= ...",
+  "reasoning": "Counted distinct patient visits in the last 7 days...",
+  "result": [{"count": 1247}]
+}
+```
+
+The agent validates generated SQL with `EXPLAIN` before execution and
+returns an error status if the question cannot be answered safely.
