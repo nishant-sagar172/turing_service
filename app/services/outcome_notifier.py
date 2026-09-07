@@ -19,12 +19,14 @@ from typing import Any
 
 import httpx
 
-from app.db.models import Call
+from app.db.models import Call, CallAnalysis
 
 logger = logging.getLogger("turing.notifier")
 
 
-def build_lean_outcome(call: Call, voice_batch_id: str | None) -> dict[str, Any]:
+def build_lean_outcome(
+    call: Call, voice_batch_id: str | None, analysis: CallAnalysis
+) -> dict[str, Any]:
     """The lean outcome contract a client stores (full record stays in turing)."""
     return {
         "turing_call_id": str(call.id),
@@ -34,7 +36,7 @@ def build_lean_outcome(call: Call, voice_batch_id: str | None) -> dict[str, Any]
         "contact_number": call.contact_number,
         "agent_id": call.agent_id,
         "status": call.status,
-        "disposition": None,  # reserved for the later analytics phase
+        "disposition": analysis.outcome,
         "recording_url": call.recording_url,
         "cost": call.cost,
         "duration": call.duration,

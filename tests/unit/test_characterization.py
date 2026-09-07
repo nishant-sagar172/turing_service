@@ -18,11 +18,12 @@ from pathlib import Path
 from typing import cast
 
 from app.core.variables import load_variable_overrides
-from app.db.models import CallAnalysis
+from app.db.models import Call, CallAnalysis
 from app.routers.calls import _analysis_result
 from app.routers.webhooks import BATCH_TERMINAL_STATUSES
 from app.services import store
 from app.services.analytics import CONNECTED, NOT_CONNECTED, TERMINAL
+from app.services.outcome_notifier import build_lean_outcome
 
 # ---------------------------------------------------------------------------
 # app/services/store.py — call-level terminal/success status sets
@@ -197,3 +198,32 @@ def test_analysis_result_maps_none_requests_and_symptoms_to_empty_lists() -> Non
 
 def test_analysis_result_returns_none_for_none_analysis() -> None:
     assert _analysis_result(None) is None
+
+
+def test_lean_outcome_uses_llm_outcome_as_disposition() -> None:
+    call = types.SimpleNamespace(
+        id="call-1",
+        voice_call_id="execution-1",
+        patient_ref="patient-1",
+        contact_number="+919876543210",
+        agent_id="agent-1",
+        status="completed",
+        recording_url="https://example.com/recording.mp3",
+        cost=0.15,
+        duration=42.0,
+        hangup_reason="user_hangup",
+    )
+    analysis = types.SimpleNamespace(outcome="booking")
+
+    result = build_lean_outcome(
+        cast(Call, call), "batch-1", cast(CallAnalysis, analysis)
+    )
+
+    assert result["disposition"] == "booking"
+
+    analysis.outcome = "not_reached"
+    placeholder = build_lean_outcome(
+        cast(Call, call), "batch-1", cast(CallAnalysis, analysis)
+    )
+
+    assert placeholder["disposition"] == "not_reached"
