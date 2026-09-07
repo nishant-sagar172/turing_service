@@ -51,7 +51,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.core.encryption import EncryptionError, decrypt
-from app.db.models import Call, CallAnalysis, ClientConfig
+from app.db.models import Batch, Call, CallAnalysis, ClientConfig
+from app.services import outcome_notifier
 
 logger = logging.getLogger("turing.analysis")
 
@@ -352,13 +353,8 @@ async def classify_by_status(
     session: AsyncSession,
     call: Call,
 ) -> CallAnalysis:
-    """Create a call_analysis row from the call's terminal status without an LLM call.
-
-    Used for calls that never connected (no-answer, busy, failed, …) — outcome
-    "not_reached" — and for completed calls that arrived without a transcript
-    — outcome "no_output" (the call happened but produced nothing to analyse).
-    """
-    outcome = "no_output" if call.status == "completed" else "not_reached"
+    """Create the not_reached placeholder for a terminal unanalysable call."""
+    outcome = "not_reached"
 
     now = datetime.now(timezone.utc)
 
@@ -393,20 +389,27 @@ async def classify_by_status(
     return analysis
 
 
+async def _voice_batch_id(session: AsyncSession, call: Call) -> str | None:
+    if call.batch_id is None:
+        return None
+    result = await session.execute(
+        select(Batch.voice_batch_id).where(Batch.id == call.batch_id)
+    )
+    return result.scalar_one_or_none()
+
+
 async def run_analysis_for_call(call_id: str, settings: Settings) -> None:
     """Analyse one call in its own session. Never raises.
 
-    Completed calls with a transcript go to the LLM classifier; every other
-    terminal status (including completed-without-transcript) goes to the
-    status-based auto-classifier. Idempotent: returns early when an analysis row
-    already exists.
+    Completed calls with a transcript are LLM-classified; other terminal calls
+    receive a not_reached placeholder before being sent to the client webhook.
 
     Lives in the service layer so both the webhook receiver and the batch
     reconcile path can schedule it without a service importing from a router.
     """
     import uuid as _uuid
 
-    from app.core.call_status import CONNECTED_STATUSES
+    from app.core.call_status import CONNECTED_STATUSES, TERMINAL_STATUSES
     from app.db.session import get_session_factory
     from app.services.tenants import get_config
 
@@ -418,14 +421,36 @@ async def run_analysis_for_call(call_id: str, settings: Settings) -> None:
             existing = await session.execute(
                 select(CallAnalysis).where(CallAnalysis.call_id == call.id)
             )
-            if existing.scalar_one_or_none() is not None:
+            existing_analysis = existing.scalar_one_or_none()
+
+            if call.status not in TERMINAL_STATUSES:
+                return
+
+            can_upgrade_placeholder = (
+                call.status in CONNECTED_STATUSES
+                and bool(call.transcript)
+                and existing_analysis is not None
+                and existing_analysis.outcome in {"not_reached", "no_output"}
+            )
+            if existing_analysis is not None and not can_upgrade_placeholder:
                 return  # already analysed
 
+            client_config = await get_config(session, call.client_id)
             if call.status in CONNECTED_STATUSES and call.transcript:
-                client_config = await get_config(session, call.client_id)
-                await analyze_call(session, call, settings, client_config)
+                analysis = await analyze_call(session, call, settings, client_config)
+                if analysis is None:
+                    return
             else:
-                await classify_by_status(session, call)
+                analysis = await classify_by_status(session, call)
+
             await session.commit()
+            outcome = outcome_notifier.build_lean_outcome(
+                call, await _voice_batch_id(session, call), analysis
+            )
+            await outcome_notifier.forward_outcome(
+                outcome,
+                webhook_url=client_config.webhook_url if client_config else None,
+                webhook_secret=client_config.webhook_secret if client_config else None,
+            )
     except Exception:
         logger.exception("Background analysis failed for call_id=%s", call_id)

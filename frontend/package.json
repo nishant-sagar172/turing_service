@@ -2,7 +2,7 @@
   "name": "turing-frontend",
   "version": "0.1.0",
   "private": true,
-  "description": "Development frontend for turing_service (Bolna gateway).",
+  "description": "Development frontend for turing_service.",
   "scripts": {
     "dev": "next dev -p 3001",
     "build": "next build",

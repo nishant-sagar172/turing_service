@@ -14,10 +14,10 @@ from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.core.call_status import TERMINAL_STATUSES
 from app.core.voice_engine import VoiceEngineClient
 from app.db.models import Batch
 from app.services.analysis import run_analysis_for_call
-from app.services.analytics import TERMINAL
 from app.services.store import upsert_call_from_execution
 
 logger = logging.getLogger("turing.batch_sync")
@@ -51,7 +51,7 @@ async def sync_batch_executions(
             call = await upsert_call_from_execution(
                 session, item, client_id=batch.client_id
             )
-            if call and call.status in TERMINAL:
+            if call and call.status in TERMINAL_STATUSES:
                 background_tasks.add_task(run_analysis_for_call, str(call.id), settings)
         except Exception:
             logger.exception(

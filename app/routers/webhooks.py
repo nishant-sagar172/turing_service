@@ -4,23 +4,15 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
-from app.db.models import Batch
+from app.core.call_status import TERMINAL_STATUSES
 from app.db.session import get_session
 from app.dependencies import get_voice_engine
-from app.services import outcome_notifier
 from app.services.analysis import run_analysis_for_call
-from app.services.analytics import TERMINAL
 from app.services.batch_sync import sync_batch_executions
-from app.services.store import (
-    extract_voice_batch_id,
-    get_batch_by_voice_id_global,
-    upsert_call_from_execution,
-)
-from app.services.tenants import get_config
+from app.services.store import get_batch_by_voice_id_global, upsert_call_from_execution
 
 logger = logging.getLogger("turing.webhooks")
 
@@ -125,34 +117,12 @@ async def voice_webhook(
             },
         )
 
-    voice_batch_id = extract_voice_batch_id(payload)
-    if voice_batch_id is None and call.batch_id is not None:
-        result = await session.execute(
-            select(Batch.voice_batch_id).where(Batch.id == call.batch_id)
-        )
-        voice_batch_id = result.scalar_one_or_none()
+    await session.commit()
 
-    config = await get_config(session, call.client_id)
-    outcome = outcome_notifier.build_lean_outcome(call, voice_batch_id)
-    forwarded = await outcome_notifier.forward_outcome(
-        outcome,
-        webhook_url=config.webhook_url if config else None,
-        webhook_secret=config.webhook_secret if config else None,
-    )
-
-    logger.info(
-        "Voice webhook: call=%s status=%s forwarded=%s",
-        call.voice_call_id,
-        call.status,
-        forwarded,
-    )
-
-    # Fire-and-forget analysis for all terminal calls.
-    if call.status in TERMINAL:
+    if call.status in TERMINAL_STATUSES:
         background_tasks.add_task(run_analysis_for_call, str(call.id), settings)
 
     return {
         "received": True,
         "execution_id": call.voice_call_id,
-        "forwarded": forwarded,
     }
