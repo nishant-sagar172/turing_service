@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import case, func, select, text
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Batch, Call, CallAnalysis
@@ -74,6 +74,10 @@ def _base_filters(
         filters.append(Call.agent_id == agent_id)
     if batch_id:
         filters.append(Call.batch_id == batch_id)
+    stopped_batch_ids = select(Batch.id).where(Batch.status == "stopped")
+    filters.append(
+        or_(Call.batch_id.is_(None), Call.batch_id.notin_(stopped_batch_ids))
+    )
     return filters
 
 
