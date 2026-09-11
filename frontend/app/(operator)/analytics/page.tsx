@@ -411,7 +411,7 @@ export default function AnalyticsPage() {
               <label>Batch</label>
               <select value={batchId} onChange={(e) => setBatchId(e.target.value)} disabled={!clientId}>
                 <option value="">All batches</option>
-                {batches.map((b) => (
+                {batches.filter((b) => b.status !== "stopped").map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.id.slice(0, 8)}… · {b.status} · {b.agent_id.slice(0, 10)}…
                   </option>
