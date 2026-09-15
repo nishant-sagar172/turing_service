@@ -47,15 +47,6 @@ NOT_CONNECTED = frozenset(
     }
 )
 TERMINAL = CONNECTED | NOT_CONNECTED
-OUTCOME_BUCKETS = [
-    "booking",
-    "escalation",
-    "not_interested",
-    "no_output",
-    "follow_up",
-    "other",
-    "not_reached",
-]
 
 
 def _base_filters(
@@ -93,28 +84,27 @@ def _volume_stats(total: int, connected: int, not_connected: int) -> CallVolumeS
 
 
 def _outcome_breakdown(
-    outcome_counts: dict[str, int], terminal: int
+    outcome_counts: dict[str, int],
+    disposition_counts: dict[str, int],
+    terminal: int,
 ) -> OutcomeBreakdown:
     analyzed = sum(outcome_counts.values())
     coverage = round(analyzed / terminal, 4) if terminal else 0.0
 
-    def _oc(bucket: str) -> OutcomeCount:
-        count = outcome_counts.get(bucket, 0)
-        return OutcomeCount(
-            count=count,
-            pct_of_analyzed=round(count / analyzed, 4) if analyzed else 0.0,
-        )
+    def _as_outcome_counts(counts: dict[str, int]) -> dict[str, OutcomeCount]:
+        return {
+            label: OutcomeCount(
+                count=count,
+                pct_of_analyzed=round(count / analyzed, 4) if analyzed else 0.0,
+            )
+            for label, count in sorted(counts.items())
+        }
 
     return OutcomeBreakdown(
         analyzed_count=analyzed,
         coverage_pct=coverage,
-        booking=_oc("booking"),
-        escalation=_oc("escalation"),
-        not_interested=_oc("not_interested"),
-        no_output=_oc("no_output"),
-        follow_up=_oc("follow_up"),
-        other=_oc("other"),
-        not_reached=_oc("not_reached"),
+        by_call_outcome=_as_outcome_counts(outcome_counts),
+        by_disposition_status=_as_outcome_counts(disposition_counts),
     )
 
 
@@ -186,6 +176,24 @@ async def _fetch_outcome_counts(
     return {row.outcome: row.cnt for row in rows}
 
 
+async def _fetch_disposition_counts(
+    session: AsyncSession, filters: list[Any]
+) -> dict[str, int]:
+    """Rows analysed before the disposition rollout have no status — they are
+    excluded rather than lumped into a synthetic bucket."""
+    rows = await session.execute(
+        select(CallAnalysis.disposition_status, func.count().label("cnt"))
+        .join(Call, Call.id == CallAnalysis.call_id)
+        .where(
+            *filters,
+            Call.status.in_(TERMINAL),
+            CallAnalysis.disposition_status.isnot(None),
+        )
+        .group_by(CallAnalysis.disposition_status)
+    )
+    return {row.disposition_status: row.cnt for row in rows}
+
+
 async def _fetch_not_connected_breakdown(
     session: AsyncSession, filters: list[Any]
 ) -> dict[str, int]:
@@ -200,6 +208,7 @@ async def _fetch_not_connected_breakdown(
 def _build_overview(
     agg: dict[str, Any],
     outcome_counts: dict[str, int],
+    disposition_counts: dict[str, int],
     nc_breakdown: dict[str, int],
     date_from: datetime | None,
     date_to: datetime | None,
@@ -226,7 +235,9 @@ def _build_overview(
             avg_per_call=avg_per_call,
             avg_per_connected=round(agg["avg_cost_connected"], 4),
         ),
-        outcomes=_outcome_breakdown(outcome_counts, connected + not_connected),
+        outcomes=_outcome_breakdown(
+            outcome_counts, disposition_counts, connected + not_connected
+        ),
         not_connected_breakdown=nc_breakdown,
         retry_stats=RetryStats(
             calls_with_retry=agg["calls_with_retry"],
@@ -245,12 +256,15 @@ async def get_overview(
     batch_id: uuid.UUID | None = None,
 ) -> AnalyticsOverview:
     filters = _base_filters(client_id, date_from, date_to, agent_id, batch_id)
-    agg, outcome_counts, nc_breakdown = (
+    agg, outcome_counts, disposition_counts, nc_breakdown = (
         await _fetch_volume_duration_cost(session, filters),
         await _fetch_outcome_counts(session, filters),
+        await _fetch_disposition_counts(session, filters),
         await _fetch_not_connected_breakdown(session, filters),
     )
-    return _build_overview(agg, outcome_counts, nc_breakdown, date_from, date_to)
+    return _build_overview(
+        agg, outcome_counts, disposition_counts, nc_breakdown, date_from, date_to
+    )
 
 
 async def get_by_agent(
@@ -320,6 +334,26 @@ async def get_by_agent(
     for r in outcome_rows:
         outcomes_by_agent.setdefault(r.agent_id, {})[r.outcome] = r.cnt
 
+    disposition_rows = (
+        await session.execute(
+            select(
+                Call.agent_id,
+                CallAnalysis.disposition_status,
+                func.count().label("cnt"),
+            )
+            .join(CallAnalysis, Call.id == CallAnalysis.call_id)
+            .where(
+                *base,
+                Call.status.in_(TERMINAL),
+                CallAnalysis.disposition_status.isnot(None),
+            )
+            .group_by(Call.agent_id, CallAnalysis.disposition_status)
+        )
+    ).all()
+    dispositions_by_agent: dict[str, dict[str, int]] = {}
+    for r in disposition_rows:
+        dispositions_by_agent.setdefault(r.agent_id, {})[r.disposition_status] = r.cnt
+
     results: list[AgentStats] = []
     for row in agg_rows:
         p50, p90 = pct_by_agent.get(row.agent_id, (None, None))
@@ -345,7 +379,9 @@ async def get_by_agent(
                     avg_per_connected=round(float(row.avg_cost_connected), 4),
                 ),
                 outcomes=_outcome_breakdown(
-                    outcomes_by_agent.get(row.agent_id, {}), terminal
+                    outcomes_by_agent.get(row.agent_id, {}),
+                    dispositions_by_agent.get(row.agent_id, {}),
+                    terminal,
                 ),
             )
         )
@@ -442,6 +478,27 @@ async def get_by_batch(
     for r in outcome_rows:
         outcomes_by_batch.setdefault(r.batch_id, {})[r.outcome] = r.cnt
 
+    disposition_rows = (
+        await session.execute(
+            select(
+                Call.batch_id,
+                CallAnalysis.disposition_status,
+                func.count().label("cnt"),
+            )
+            .join(CallAnalysis, Call.id == CallAnalysis.call_id)
+            .where(
+                *base_with_batch,
+                Call.status.in_(TERMINAL),
+                Call.batch_id.in_(batch_pks),
+                CallAnalysis.disposition_status.isnot(None),
+            )
+            .group_by(Call.batch_id, CallAnalysis.disposition_status)
+        )
+    ).all()
+    dispositions_by_batch: dict[uuid.UUID, dict[str, int]] = {}
+    for r in disposition_rows:
+        dispositions_by_batch.setdefault(r.batch_id, {})[r.disposition_status] = r.cnt
+
     results: list[BatchStats] = []
     for row in agg_rows:
         p50, p90 = pct_by_batch.get(row.batch_pk, (None, None))
@@ -470,7 +527,9 @@ async def get_by_batch(
                     avg_per_connected=round(float(row.avg_cost_connected), 4),
                 ),
                 outcomes=_outcome_breakdown(
-                    outcomes_by_batch.get(row.batch_pk, {}), terminal
+                    outcomes_by_batch.get(row.batch_pk, {}),
+                    dispositions_by_batch.get(row.batch_pk, {}),
+                    terminal,
                 ),
             )
         )
@@ -514,7 +573,7 @@ async def get_timeseries(
             total=int(row.total),
             connected=int(row.connected or 0),
             not_connected=int(row.not_connected or 0),
-            outcomes={b: 0 for b in OUTCOME_BUCKETS},
+            outcomes={},
         )
 
     outcome_rows = await session.execute(
@@ -530,7 +589,7 @@ async def get_timeseries(
     )
     for row in outcome_rows:
         date_str = row.bucket.date().isoformat()
-        if date_str in points_by_date and row.outcome in OUTCOME_BUCKETS:
+        if date_str in points_by_date:
             points_by_date[date_str].outcomes[row.outcome] = int(row.cnt)
 
     return list(points_by_date.values())
