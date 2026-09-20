@@ -43,11 +43,19 @@ jobs:
             echo "==> Pulling latest code..."
             git pull origin main
 
-            echo "==> Building images..."
-            docker compose -f docker-compose.prod.yml --env-file .env.prod build
+            echo "==> Building images (tools profile includes migrate)..."
+            docker compose -f docker-compose.prod.yml --env-file .env.prod --profile tools build
+
+            echo "==> Backing up database before migrating..."
+            mkdir -p ~/backups
+            docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T postgres               sh -c 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"'               > ~/backups/turing_db_$(date +%F_%H%M%S).dump
+            test -s "$(ls -t ~/backups/turing_db_*.dump | head -n 1)"
+            ls -t ~/backups/turing_db_*.dump | tail -n +11 | xargs -r rm --
 
             echo "==> Running migrations..."
+            docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm migrate alembic current
             docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm migrate
+            docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm migrate alembic current
 
             echo "==> Restarting services..."
             docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
