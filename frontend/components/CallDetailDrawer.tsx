@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import { adminApi } from "@/lib/adminApi";
 import AudioPlayer from "@/components/AudioPlayer";
+import { dispositionColor, outcomeColor, outcomeLabel } from "@/lib/outcomes";
 import type { CallAnalysisResult, CallDetail } from "@/lib/types";
 
 const successStyle = {
@@ -18,33 +19,42 @@ const successStyle = {
   animation: "page-in 0.25s var(--ease-glass)",
 } as const;
 
-const OUTCOME_COLORS: Record<string, string> = {
-  booking: "var(--green)",
-  escalation: "var(--amber)",
-  not_interested: "var(--red)",
-  no_output: "var(--muted)",
-  follow_up: "var(--accent)",
-  other: "var(--muted)",
-  not_reached: "var(--muted)",
-};
-
 const URGENCY_COLORS: Record<string, string> = {
   low: "var(--muted)",
   medium: "var(--amber)",
   high: "var(--red)",
 };
 
-function OutcomeBadge({ outcome }: { outcome: string }) {
-  const color = OUTCOME_COLORS[outcome] ?? "var(--muted)";
+function Pill({ label, color, title }: { label: string; color: string; title?: string }) {
   return (
-    <span style={{
-      fontSize: 11, padding: "2px 8px", borderRadius: 20, fontWeight: 600,
-      background: `color-mix(in srgb, ${color} 14%, transparent)`,
-      border: `1px solid color-mix(in srgb, ${color} 35%, transparent)`,
-      color,
-      whiteSpace: "nowrap",
-    }}>
-      {outcome.replace("_", " ")}
+    <span
+      title={title}
+      style={{
+        fontSize: 11, padding: "2px 8px", borderRadius: 20, fontWeight: 600,
+        background: `color-mix(in srgb, ${color} 14%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${color} 35%, transparent)`,
+        color,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function OutcomeBadge({ outcome }: { outcome: string }) {
+  return <Pill label={outcomeLabel(outcome)} color={outcomeColor(outcome)} />;
+}
+
+/** Disposition leads, sub-status trails it — the pair is the business label. */
+function DispositionBadge({ status, subStatus }: { status: string; subStatus: string | null }) {
+  const color = dispositionColor(status);
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <Pill label={status} color={color} />
+      {subStatus && (
+        <span className="muted" style={{ fontSize: 11 }}>{subStatus}</span>
+      )}
     </span>
   );
 }
@@ -190,7 +200,15 @@ export default function CallDetailDrawer({
                   borderRadius: "var(--radius)", padding: "14px 16px",
                 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-                    <OutcomeBadge outcome={detail.analysis.outcome} />
+                    {detail.analysis.disposition_status && (
+                      <DispositionBadge
+                        status={detail.analysis.disposition_status}
+                        subStatus={detail.analysis.sub_status}
+                      />
+                    )}
+                    {detail.analysis.call_outcome && (
+                      <OutcomeBadge outcome={detail.analysis.call_outcome} />
+                    )}
                     {detail.analysis.urgency && <UrgencyBadge urgency={detail.analysis.urgency} />}
                     {detail.analysis.model_used && (
                       <span className="muted" style={{ fontSize: 11 }}>

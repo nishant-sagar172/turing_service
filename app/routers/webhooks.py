@@ -6,13 +6,13 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.call_status import normalize_batch_status
 from app.config import Settings, get_settings
-from app.core.call_status import TERMINAL_STATUSES
 from app.db.session import get_session
 from app.dependencies import get_voice_engine
-from app.services.analysis import run_analysis_for_call
 from app.services.batch_sync import sync_batch_executions
-from app.services.store import get_batch_by_voice_id_global, upsert_call_from_execution
+from app.services.call_sync import complete_call, sync_execution
+from app.services.store import get_batch_by_voice_id_global
 
 logger = logging.getLogger("turing.webhooks")
 
@@ -69,9 +69,9 @@ async def _handle_batch_webhook(
             },
         )
 
-    status = payload.get("status")
+    status = normalize_batch_status(payload.get("status"))
     if status:
-        batch.status = str(status)
+        batch.status = status
 
     synced = 0
     if status in BATCH_TERMINAL_STATUSES:
@@ -106,7 +106,7 @@ async def voice_webhook(
             request, payload, background_tasks, session, settings
         )
 
-    call = await upsert_call_from_execution(session, payload)
+    call, just_finished = await sync_execution(session, payload)
     if call is None:
         raise HTTPException(
             status_code=422,
@@ -116,13 +116,22 @@ async def voice_webhook(
                 "to a client.",
             },
         )
-
     await session.commit()
 
-    if call.status in TERMINAL_STATUSES:
-        background_tasks.add_task(run_analysis_for_call, str(call.id), settings)
+    # Bolna populates the transcript, recording and extracted_data on the
+    # terminal `completed` event itself (call-disconnected is non-terminal and
+    # carries none), so the terminal transition is the right and only trigger.
+    if just_finished:
+        background_tasks.add_task(complete_call, call.id, settings)
 
+    logger.info(
+        "Voice webhook: call=%s status=%s completing=%s",
+        call.voice_call_id,
+        call.status,
+        just_finished,
+    )
     return {
         "received": True,
         "execution_id": call.voice_call_id,
+        "completing": just_finished,
     }

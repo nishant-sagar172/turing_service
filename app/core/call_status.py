@@ -30,3 +30,17 @@ TERMINAL_STATUSES: frozenset[str] = CONNECTED_STATUSES | NOT_CONNECTED_STATUSES
 BATCH_TERMINAL_STATUSES: frozenset[str] = frozenset(
     {"completed", "stopped", "failed", "cancelled", "canceled"}
 )
+
+
+def normalize_batch_status(raw: str | None) -> str | None:
+    """Reduce the voice engine's batch state to a bare status token.
+
+    Bolna reports a scheduled batch as ``"scheduled at 2026-09-15T14:16:00+00:00"``
+    — a status with the timestamp glued on. Stored verbatim that value never
+    equals ``"scheduled"``, so anything filtering on status silently skips the
+    batch. Only the leading token is kept; the schedule itself already lives in
+    ``Batch.scheduled_at``.
+    """
+    if raw is None:
+        return None
+    return raw.split(" at ", 1)[0].strip() or None

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Any, overload
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.services.workflows import WORKFLOW_CODE_PATTERN
 
 
 @overload
@@ -19,6 +22,25 @@ def normalize_scheduled_at(value: str | None) -> str | None:
     if value.endswith("Z"):
         value = value[:-1] + "+00:00"
     return value
+
+
+# E.164: a leading "+", a non-zero country code, then up to 15 digits total.
+# The voice engine rejects anything without a country code ("Provided
+# recipient_phone_number is not valid"), so catching it here turns an opaque
+# upstream 400 into a clear 422 without spending the API call.
+_E164 = re.compile(r"^\+[1-9]\d{6,14}$")
+
+
+def validate_e164(value: str | None, field: str) -> str | None:
+    if value is None:
+        return None
+    candidate = value.strip()
+    if not _E164.match(candidate):
+        raise ValueError(
+            f"{field} must be in E.164 format — a '+' followed by the country "
+            f"code and number, e.g. +919876543210 (got {value!r})"
+        )
+    return candidate
 
 
 class RetryConfig(BaseModel):
@@ -57,15 +79,32 @@ class MakeCallRequest(BaseModel):
         default=None,
         description="Skip Bolna's calling-time guardrail checks.",
     )
+    workflow_code: str | None = Field(
+        default=None,
+        pattern=WORKFLOW_CODE_PATTERN,
+        description="Optional calling workflow (see GET /v1/workflows). When "
+        "omitted, falls back to the client's default_workflow_code, then to the "
+        "common outcome set.",
+    )
 
     @field_validator("scheduled_at")
     @classmethod
     def _normalize_scheduled_at(cls, value: str | None) -> str | None:
         return normalize_scheduled_at(value)
 
+    @field_validator("recipient_phone_number")
+    @classmethod
+    def _check_recipient(cls, value: str) -> str:
+        return validate_e164(value, "recipient_phone_number")  # type: ignore[return-value]
+
+    @field_validator("from_phone_number")
+    @classmethod
+    def _check_from_number(cls, value: str | None) -> str | None:
+        return validate_e164(value, "from_phone_number")
+
     def to_voice_engine_payload(self) -> dict[str, Any]:
         """Build the voice engine's ``POST /call`` body, dropping unset fields."""
-        return self.model_dump(exclude_none=True)
+        return self.model_dump(exclude_none=True, exclude={"workflow_code"})
 
 
 class MakeCallResponse(BaseModel):

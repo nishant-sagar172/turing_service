@@ -5,7 +5,7 @@ Tenant/admin authentication itself happens in ``AuthMiddleware``
 already established, so handlers get a typed tenant without re-deriving it.
 """
 
-from typing import cast
+from typing import Any, cast
 
 from fastapi import HTTPException, Request
 
@@ -38,7 +38,7 @@ def get_current_tenant(request: Request) -> TenantContext:
     return cast(TenantContext, tenant)
 
 
-def get_redis(request: Request):
+def get_redis(request: Request) -> Any:
     """Return the process-wide async Redis client, or None when unconfigured."""
     return getattr(request.app.state, "redis", None)
 

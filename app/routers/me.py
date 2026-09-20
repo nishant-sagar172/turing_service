@@ -68,6 +68,11 @@ async def get_my_config(
             webhook_secret_set=False,
             visible_fields=None,
             settings=None,
+            analysis_llm_provider=None,
+            analysis_llm_model=None,
+            analysis_prompt_hint=None,
+            analysis_llm_api_key_set=False,
+            default_workflow_code=None,
         )
     return ClientConfigResponse(
         default_from_number=config.default_from_number,
@@ -75,6 +80,11 @@ async def get_my_config(
         webhook_secret_set=bool(config.webhook_secret),
         visible_fields=config.visible_fields,
         settings=config.settings,
+        analysis_llm_provider=config.analysis_llm_provider,
+        analysis_llm_model=config.analysis_llm_model,
+        analysis_prompt_hint=config.analysis_prompt_hint,
+        analysis_llm_api_key_set=bool(config.analysis_llm_api_key_enc),
+        default_workflow_code=config.default_workflow_code,
     )
 
 
@@ -83,7 +93,8 @@ async def list_my_keys(
     tenant: TenantContext = Depends(get_current_tenant),
     session: AsyncSession = Depends(get_session),
 ) -> list[KeySummary]:
-    return await tenants.list_keys(session, tenant.client_id)
+    keys = await tenants.list_keys(session, tenant.client_id)
+    return [KeySummary.model_validate(key, from_attributes=True) for key in keys]
 
 
 @router.post("/keys", response_model=IssueKeyResponse, status_code=201)
@@ -102,7 +113,7 @@ async def issue_my_key(
     return IssueKeyResponse(key_id=key_row.id, api_key=raw_key)
 
 
-@router.delete("/keys/{key_id}", status_code=204)
+@router.delete("/keys/{key_id}", status_code=204, response_model=None)
 async def revoke_my_key(
     key_id: uuid.UUID,
     tenant: TenantContext = Depends(get_current_tenant),

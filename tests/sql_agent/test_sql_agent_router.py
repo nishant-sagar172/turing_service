@@ -83,7 +83,9 @@ def test_sql_agent_route_accepts_valid_api_key(monkeypatch) -> None:
         return BuildQueryResponse(status="blocked", reason="write_intent")
 
     monkeypatch.setattr("app.middleware.resolve_api_key", fake_resolve_api_key)
-    monkeypatch.setattr("app.db.session.get_session_factory", lambda: lambda: _FakeSession())
+    monkeypatch.setattr(
+        "app.db.session.get_session_factory", lambda: lambda: _FakeSession()
+    )
     monkeypatch.setattr(sql_agent, "build_query", fake_build_query)
 
     response = TestClient(create_app()).post(
@@ -120,7 +122,9 @@ def test_calling_service_can_build_sql_through_endpoint(monkeypatch) -> None:
         )
 
     monkeypatch.setattr("app.middleware.resolve_api_key", fake_resolve_api_key)
-    monkeypatch.setattr("app.db.session.get_session_factory", lambda: lambda: _FakeSession())
+    monkeypatch.setattr(
+        "app.db.session.get_session_factory", lambda: lambda: _FakeSession()
+    )
     monkeypatch.setattr(sql_agent, "build_query", fake_build_query)
 
     response = TestClient(create_app()).post(

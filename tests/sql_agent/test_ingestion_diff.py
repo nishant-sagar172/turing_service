@@ -207,7 +207,9 @@ class TestDiffRows:
         fresh = {"a": "h1", "b": "h2", "c": "h3"}
         first = diff.diff_rows({}, fresh)
         assert first.created == set(fresh)
-        applied = {key: diff.RowState(content_hash=value) for key, value in fresh.items()}
+        applied = {
+            key: diff.RowState(content_hash=value) for key, value in fresh.items()
+        }
         second = diff.diff_rows(applied, fresh)
         assert second.unchanged == set(fresh)
         assert not second.changed

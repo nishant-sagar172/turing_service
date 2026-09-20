@@ -17,13 +17,13 @@ import types
 from pathlib import Path
 from typing import cast
 
+from app.core.call_status import normalize_batch_status
 from app.core.variables import load_variable_overrides
-from app.db.models import Call, CallAnalysis
+from app.db.models import CallAnalysis
 from app.routers.calls import _analysis_result
 from app.routers.webhooks import BATCH_TERMINAL_STATUSES
 from app.services import store
 from app.services.analytics import CONNECTED, NOT_CONNECTED, TERMINAL
-from app.services.outcome_notifier import build_lean_outcome
 
 # ---------------------------------------------------------------------------
 # app/services/store.py — call-level terminal/success status sets
@@ -109,14 +109,18 @@ def test_load_variable_overrides_missing_path_returns_empty_dict() -> None:
 def test_load_variable_overrides_parses_real_file(tmp_path: Path) -> None:
     load_variable_overrides.cache_clear()
     path = tmp_path / "overrides.json"
-    path.write_text(json.dumps({"agent-1": {"optional": ["nickname"]}}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"agent-1": {"optional": ["nickname"]}}), encoding="utf-8"
+    )
 
     result = load_variable_overrides(str(path))
 
     assert result == {"agent-1": {"optional": ["nickname"]}}
 
 
-def test_load_variable_overrides_malformed_json_returns_empty_dict(tmp_path: Path) -> None:
+def test_load_variable_overrides_malformed_json_returns_empty_dict(
+    tmp_path: Path,
+) -> None:
     load_variable_overrides.cache_clear()
     path = tmp_path / "broken.json"
     path.write_text("{not valid json", encoding="utf-8")
@@ -170,60 +174,152 @@ def test_call_fields_from_execution_maps_well_formed_payload() -> None:
 
 
 def test_analysis_result_maps_none_requests_and_symptoms_to_empty_lists() -> None:
+    # What analyze_call writes: one granular `call_outcome`, with the
+    # disposition pair derived from it in Python.
     fake_analysis = types.SimpleNamespace(
-        outcome="booking",
+        call_outcome="scheduled_booking",
+        disposition_status="Booking",
+        sub_status=None,
+        workflow_code="opd",
         summary="Patient confirmed appointment.",
         reason="Explicit confirmation of slot.",
         requests=None,
         urgency="low",
         confidence=0.9,
         symptoms_reported=None,
-        model_used="anthropic/claude-haiku-4-5-20251001",
+        model_used="openai/gpt-5.6-luna",
         analyzed_at=None,
     )
 
     result = _analysis_result(cast(CallAnalysis, fake_analysis))
 
     assert result is not None
-    assert result.outcome == "booking"
+    assert result.call_outcome == "scheduled_booking"
+    assert result.disposition_status == "Booking"
+    assert result.sub_status is None
+    assert result.workflow_code == "opd"
     assert result.summary == "Patient confirmed appointment."
     assert result.reason == "Explicit confirmation of slot."
     assert result.requests == []
     assert result.urgency == "low"
     assert result.confidence == 0.9
     assert result.symptoms_reported == []
-    assert result.model_used == "anthropic/claude-haiku-4-5-20251001"
+    assert result.model_used == "openai/gpt-5.6-luna"
     assert result.analyzed_at is None
+
+
+def test_analysis_result_passes_through_pre_disposition_rows() -> None:
+    """Rows analysed before 0009 have no classification at all after 0011.
+
+    0011 dropped the `outcome` mirror without backfilling, so these rows carry
+    NULL everywhere. The serializer must surface them as unclassified rather
+    than erroring or inventing a disposition.
+    """
+    legacy_analysis = types.SimpleNamespace(
+        call_outcome=None,
+        disposition_status=None,
+        sub_status=None,
+        workflow_code=None,
+        summary="Call ended with status: no-answer",
+        reason="Auto-classified from terminal status 'no-answer' (no transcript).",
+        requests=[],
+        urgency=None,
+        confidence=None,
+        symptoms_reported=None,
+        model_used="status-classifier/v1",
+        analyzed_at=None,
+    )
+
+    result = _analysis_result(cast(CallAnalysis, legacy_analysis))
+
+    assert result is not None
+    assert result.call_outcome is None
+    assert result.disposition_status is None
+    assert result.sub_status is None
+    assert result.workflow_code is None
 
 
 def test_analysis_result_returns_none_for_none_analysis() -> None:
     assert _analysis_result(None) is None
 
 
-def test_lean_outcome_uses_llm_outcome_as_disposition() -> None:
-    call = types.SimpleNamespace(
-        id="call-1",
-        voice_call_id="execution-1",
-        patient_ref="patient-1",
-        contact_number="+919876543210",
-        agent_id="agent-1",
-        status="completed",
-        recording_url="https://example.com/recording.mp3",
-        cost=0.15,
-        duration=42.0,
-        hangup_reason="user_hangup",
-    )
-    analysis = types.SimpleNamespace(outcome="booking")
+# ---------------------------------------------------------------------------
+# app/core/call_status.py — normalize_batch_status
+# ---------------------------------------------------------------------------
 
-    result = build_lean_outcome(
-        cast(Call, call), "batch-1", cast(CallAnalysis, analysis)
+
+def test_normalize_batch_status_strips_the_glued_on_schedule() -> None:
+    # Bolna reports a scheduled batch with the timestamp inside the status.
+    assert normalize_batch_status("scheduled at 2026-09-15T14:16:00.000+00:00") == (
+        "scheduled"
+    )
+    assert normalize_batch_status("scheduled at 2026-08-28T19:32:00+05:30") == (
+        "scheduled"
     )
 
-    assert result["disposition"] == "booking"
 
-    analysis.outcome = "not_reached"
-    placeholder = build_lean_outcome(
-        cast(Call, call), "batch-1", cast(CallAnalysis, analysis)
-    )
+def test_normalize_batch_status_leaves_plain_statuses_alone() -> None:
+    for status in BATCH_TERMINAL_STATUSES | {"scheduled", "running"}:
+        assert normalize_batch_status(status) == status
 
-    assert placeholder["disposition"] == "not_reached"
+
+def test_normalize_batch_status_maps_empty_to_none() -> None:
+    assert normalize_batch_status(None) is None
+    assert normalize_batch_status("") is None
+    assert normalize_batch_status("   ") is None
+
+
+def test_every_batch_status_write_goes_through_the_normalizer() -> None:
+    """The engine glues a timestamp onto 'scheduled'; one unguarded write path
+    is enough to put it back in the column, which is how 14 rows got there."""
+    # Flag a status taken straight from the engine rather than the variable it
+    # was already normalised into.
+    engine_sourced = ("response.state", 'live["status"]', 'live.get("status")')
+    raw_writes = [
+        line.strip()
+        for path in ("app/routers/batches.py", "app/routers/webhooks.py")
+        for line in Path(path).read_text(encoding="utf-8").splitlines()
+        if any(src in line for src in engine_sourced)
+        and "normalize_batch_status" not in line
+    ]
+    assert raw_writes == [], f"unnormalised batch status writes: {raw_writes}"
+
+
+# ---------------------------------------------------------------------------
+# app/routers/health.py — readiness must distinguish itself from liveness
+# ---------------------------------------------------------------------------
+
+
+def test_readiness_returns_503_naming_the_failed_dependency() -> None:
+    """A dead database must not read as a generic 500 with no detail, and must
+    not leave container healthchecks reporting green."""
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+    from app.routers import health as health_router
+
+    def exploding_factory():  # type: ignore[no-untyped-def]
+        raise ConnectionRefusedError("connection refused")
+
+    original = health_router.get_session_factory
+    health_router.get_session_factory = exploding_factory
+    try:
+        client = TestClient(create_app(), raise_server_exceptions=False)
+        response = client.get("/health/ready")
+        assert response.status_code == 503
+        body = response.json()
+        assert body["detail"]["error"] == "database_unreachable"
+        assert body["detail"]["cause"] == "ConnectionRefusedError"
+        # Liveness stays up — the process is fine, its dependency is not.
+        assert client.get("/health").status_code == 200
+    finally:
+        health_router.get_session_factory = original
+
+
+def test_container_healthchecks_probe_readiness_not_liveness() -> None:
+    for path in ("Dockerfile", "docker-compose.yml", "docker-compose.prod.yml"):
+        text = Path(path).read_text(encoding="utf-8")
+        assert "8005/health/ready" in text, f"{path} does not probe readiness"
+        assert '8005/health"' not in text and "8005/health " not in text, (
+            f"{path} still probes bare /health"
+        )

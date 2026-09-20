@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Turing Service — GCP Deployment Guide</title>
+  <style>
+    :root {
+      --color-bg: #ffffff;
+      --color-text: #1a1a2e;
+      --color-text-secondary: #4a4a6a;
+      --color-primary: #2563eb;
+      --color-primary-light: #eff6ff;
+      --color-border: #e2e8f0;
+      --color-border-light: #f1f5f9;
+      --color-code-bg: #f8fafc;
+      --color-success: #059669;
+      --color-warning: #d97706;
+      --color-danger: #dc2626;
+      --color-info: #0891b2;
+      --color-get: #059669;
+      --color-post: #2563eb;
+      --color-put: #7c3aed;
+      --color-patch: #d97706;
+      --color-delete: #dc2626;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+      --radius: 8px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --color-bg: #0f172a;
+        --color-text: #e2e8f0;
+        --color-text-secondary: #94a3b8;
+        --color-primary: #60a5fa;
+        --color-primary-light: #1e293b;
+        --color-border: #334155;
+        --color-border-light: #1e293b;
+        --color-code-bg: #1e293b;
+        --color-success: #34d399;
+        --color-warning: #fbbf24;
+        --color-danger: #f87171;
+        --color-info: #22d3ee;
+        --color-get: #34d399;
+        --color-post: #60a5fa;
+        --color-put: #a78bfa;
+        --color-patch: #fbbf24;
+        --color-delete: #f87171;
+      }
+    }
+    :root[data-theme="dark"] {
+      --color-bg: #0f172a;
+      --color-text: #e2e8f0;
+      --color-text-secondary: #94a3b8;
+      --color-primary: #60a5fa;
+      --color-primary-light: #1e293b;
+      --color-border: #334155;
+      --color-border-light: #1e293b;
+      --color-code-bg: #1e293b;
+      --color-success: #34d399;
+      --color-warning: #fbbf24;
+      --color-danger: #f87171;
+      --color-info: #22d3ee;
+      --color-get: #34d399;
+      --color-post: #60a5fa;
+      --color-put: #a78bfa;
+      --color-patch: #fbbf24;
+      --color-delete: #f87171;
+    }
+
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-sans);
+      color: var(--color-text);
+      background: var(--color-bg);
+      line-height: 1.7;
+      font-size: 15px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 32px;
+    }
+
+    /* ── Cover ── */
+    .cover {
+      padding: 80px 0 60px;
+      border-bottom: 1px solid var(--color-border);
+      margin-bottom: 48px;
+    }
+    .cover-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--color-primary);
+      background: var(--color-primary-light);
+      padding: 4px 12px;
+      border-radius: 100px;
+      margin-bottom: 20px;
+    }
+    .cover h1 {
+      font-size: 42px;
+      font-weight: 800;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      margin-bottom: 12px;
+    }
+    .cover .subtitle {
+      font-size: 18px;
+      color: var(--color-text-secondary);
+      margin-bottom: 24px;
+    }
+    .cover-meta {
+      display: flex;
+      gap: 24px;
+      font-size: 13px;
+      color: var(--color-text-secondary);
+    }
+    .cover-meta span { display: flex; align-items: center; gap: 6px; }
+
+    /* ── TOC ── */
+    .toc {
+      background: var(--color-primary-light);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 28px 32px;
+      margin-bottom: 56px;
+    }
+    .toc h2 {
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-text-secondary);
+      margin-bottom: 16px;
+    }
+    .toc ol {
+      list-style: none;
+      counter-reset: toc-counter;
+      columns: 2;
+      column-gap: 40px;
+    }
+    .toc li {
+      counter-increment: toc-counter;
+      margin-bottom: 8px;
+      break-inside: avoid;
+    }
+    .toc li::before {
+      content: counter(toc-counter, decimal-leading-zero) ".";
+      font-weight: 600;
+      color: var(--color-primary);
+      margin-right: 8px;
+      font-size: 13px;
+      font-family: var(--font-mono);
+    }
+    .toc a {
+      color: var(--color-text);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 14px;
+    }
+    .toc a:hover { color: var(--color-primary); }
+
+    /* ── Sections ── */
+    section { margin-bottom: 56px; scroll-margin-top: 80px; }
+    section > h2 {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin-bottom: 8px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid var(--color-primary);
+      display: inline-block;
+    }
+    section > h2 + p { margin-top: 12px; }
+    section h3 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-top: 32px;
+      margin-bottom: 10px;
+    }
+    section h4 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-top: 24px;
+      margin-bottom: 8px;
+      color: var(--color-text-secondary);
+    }
+    p { margin-bottom: 14px; }
+    li { margin-bottom: 8px; }
+
+    /* ── Code blocks ── */
+    pre {
+      background: var(--color-code-bg);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+      margin: 12px 0 18px;
+    }
+    code {
+      font-family: var(--font-mono);
+      font-size: 0.9em;
+      background: var(--color-code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    pre code { background: none; padding: 0; }
+
+    /* ── Tables ── */
+    .table-wrap {
+      overflow-x: auto;
+      margin: 12px 0 20px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+    }
+    thead { background: var(--color-primary-light); }
+    th {
+      text-align: left;
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--color-text-secondary);
+      padding: 10px 16px;
+      border-bottom: 2px solid var(--color-border);
+      white-space: nowrap;
+    }
+    td {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--color-border-light);
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+
+    /* ── Callout boxes ── */
+    .callout {
+      border-left: 4px solid;
+      padding: 14px 18px;
+      margin: 16px 0;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      font-size: 14px;
+    }
+    .callout-info    { border-color: var(--color-info); background: color-mix(in srgb, var(--color-info) 8%, transparent); }
+    .callout-warning { border-color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 8%, transparent); }
+    .callout-danger  { border-color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 8%, transparent); }
+    .callout strong { font-weight: 600; }
+
+    /* ── Lists ── */
+    ul, ol { margin-left: 24px; margin-bottom: 14px; }
+    li + li { margin-top: 6px; }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+      color: var(--color-primary);
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .badge-required { background: color-mix(in srgb, var(--color-danger) 15%, transparent); color: var(--color-danger); }
+    .badge-optional { background: color-mix(in srgb, var(--color-success) 15%, transparent); color: var(--color-success); }
+
+    /* ── ASCII diagram ── */
+    .diagram {
+      background: var(--color-code-bg);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin: 24px 0;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-x: auto;
+      color: var(--color-text);
+    }
+
+    /* ── Footer ── */
+    footer {
+      margin-top: 80px;
+      padding-top: 32px;
+      padding-bottom: 48px;
+      border-top: 1px solid var(--color-border);
+      font-size: 13px;
+      color: var(--color-text-secondary);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Cover -->
+    <div class="cover">
+      <div class="cover-badge">Deployment</div>
+      <h1>Turing Service</h1>
+      <p class="subtitle">GCP Deployment Guide</p>
+      <p class="subtitle" style="font-size: 16px; color: var(--color-text-secondary); margin-top: 8px;">End-to-end deployment on Google Cloud Platform</p>
+      <div class="cover-meta">
+        <span>Last updated: August 2026</span>
+      </div>
+    </div>
+
+    <!-- Table of Contents -->
+    <div class="toc">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#prerequisites">Prerequisites</a></li>
+        <li><a href="#gcp-infrastructure">GCP Infrastructure Setup</a></li>
+        <li><a href="#vm-setup">VM Setup</a></li>
+        <li><a href="#production-configuration">Production Environment Configuration</a></li>
+        <li><a href="#deploy">Deploy</a></li>
+        <li><a href="#ssl-tls">SSL/TLS with Caddy</a></li>
+        <li><a href="#webhook-integration">Webhook Integration</a></li>
+        <li><a href="#client-onboarding">Client Onboarding</a></li>
+        <li><a href="#maintenance">Maintenance</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+        <li><a href="#architecture">Architecture Diagram</a></li>
+      </ol>
+    </div>
+
+    <!-- Section 1: Overview -->
+    <section id="overview">
+      <h2>Overview</h2>
+      <p>The Turing Service runs entirely on a single Google Compute Engine VM, orchestrated with <code>docker-compose.prod.yml</code>. This guide covers production-grade deployment to GCP.</p>
+
+      <h3>Architecture</h3>
+      <ul>
+        <li><strong>Compute Engine VM</strong>: Single e2-medium instance running all services</li>
+        <li><strong>Services</strong>:
+          <ul>
+            <li>FastAPI backend (port 8005) — voice call orchestration, client management, call analysis</li>
+            <li>Next.js frontend (port 3001) — multi-tenant admin console with real-time dashboards</li>
+            <li>PostgreSQL 17 (port 5432) — pgvector enabled for semantic search in call analysis</li>
+            <li>Redis 7 (port 6379) — session auth, rate limiting, task queues</li>
+          </ul>
+        </li>
+      </ul>
+
+      <h3>Cost Breakdown</h3>
+      <ul>
+        <li><strong>Self-managed on single VM</strong>: ~$35/month (e2-medium + storage)</li>
+        <li><strong>Managed services</strong> (Cloud SQL + Memorystore): ~$66/month (higher reliability, auto-backups)</li>
+      </ul>
+
+      <h3>Capacity</h3>
+      <p>This configuration comfortably handles:</p>
+      <ul>
+        <li>20+ concurrent client tenants</li>
+        <li>20,000+ outbound calls per day</li>
+        <li>Sub-50ms API response times under normal load</li>
+      </ul>
+    </section>
+
+    <!-- Section 2: Prerequisites -->
+    <section id="prerequisites">
+      <h2>Prerequisites</h2>
+      <p>Before starting deployment, ensure you have:</p>
+      <ul>
+        <li><strong>GCP Project</strong> with billing enabled (create at <code>console.cloud.google.com</code>)</li>
+        <li><strong>Domain name</strong> (e.g., <code>turing.docstribe.com</code>) with DNS control</li>
+        <li><strong>Git access</strong> to <code>https://github.com/nishant-sagar172/turing_service</code></li>
+        <li><strong>gcloud CLI</strong> installed locally and authenticated</li>
+        <li><strong>Bolna voice engine API key</strong> (from Bolna dashboard)</li>
+        <li><strong>LLM API key</strong> (OpenAI or Anthropic, for call analysis)</li>
+      </ul>
+      <div class="callout callout-info">
+        <strong>Tip:</strong> Run <code>gcloud auth login</code> and <code>gcloud config set project YOUR_PROJECT_ID</code> before proceeding.
+      </div>
+    </section>
+
+    <!-- Section 3: GCP Infrastructure Setup -->
+    <section id="gcp-infrastructure">
+      <h2>GCP Infrastructure Setup</h2>
+
+      <h3 id="gcp-vm">3.1 Create Compute Engine VM</h3>
+      <p>Launch a Compute Engine instance in a region near your users. We use <code>asia-south1-a</code> for India.</p>
+      <pre>gcloud compute instances create turing-prod \
+  --zone=asia-south1-a \
+  --machine-type=e2-medium \
+  --image-family=ubuntu-2204-lts \
+  --image-project=ubuntu-os-cloud \
+  --boot-disk-size=30GB \
+  --boot-disk-type=pd-ssd \
+  --tags=turing-server</pre>
+
+      <h3 id="gcp-static-ip">3.2 Reserve Static IP</h3>
+      <p>Allocate a static external IP for your domain DNS A record:</p>
+      <pre>gcloud compute addresses create turing-ip --region=asia-south1
+gcloud compute addresses describe turing-ip --region=asia-south1 --format='get(address)'
+# Attach to VM
+gcloud compute instances delete-access-config turing-prod --zone=asia-south1-a --access-config-name="External NAT"
+gcloud compute instances add-access-config turing-prod --zone=asia-south1-a --address=STATIC_IP</pre>
+
+      <h3 id="gcp-firewall">3.3 Firewall Rules</h3>
+      <p>Open ports for HTTPS traffic and Bolna webhooks:</p>
+      <pre>
+# HTTPS (frontend + API)
+gcloud compute firewall-rules create turing-allow-https \
+  --allow=tcp:443,tcp:80 \
+  --target-tags=turing-server \
+  --source-ranges=0.0.0.0/0
+
+# Webhook from Bolna (optional: if accepting direct webhooks)
+gcloud compute firewall-rules create turing-allow-bolna \
+  --allow=tcp:8005 \
+  --target-tags=turing-server \
+  --source-ranges=13.203.39.153/32</pre>
+
+      <h3 id="gcp-dns">3.4 DNS Configuration</h3>
+      <p>Point your domain's A record to the static IP:</p>
+      <pre>A record: turing.docstribe.com  →  STATIC_IP</pre>
+      <p>Wait 5-10 minutes for DNS propagation before proceeding to Caddy setup.</p>
+    </section>
+
+    <!-- Section 4: VM Setup -->
+    <section id="vm-setup">
+      <h2>VM Setup</h2>
+
+      <h3 id="vm-docker">4.1 Install Docker</h3>
+      <p>SSH into your instance and install Docker:</p>
+      <pre>gcloud compute ssh turing-prod --zone=asia-south1-a
+
+# On the VM:
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y ca-certificates curl gnupg
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo usermod -aG docker $USER
+# Log out and back in for group change</pre>
+
+      <h3 id="vm-clone">4.2 Clone Repository</h3>
+      <pre>git clone https://github.com/nishant-sagar172/turing_service.git
+cd turing_service</pre>
+    </section>
+
+    <!-- Section 5: Production Environment Configuration -->
+    <section id="production-configuration">
+      <h2>Production Environment Configuration</h2>
+
+      <h3 id="env-create">5.1 Create .env.prod</h3>
+      <pre>cp .env.example .env.prod
+# Edit .env.prod with your production values
+nano .env.prod</pre>
+
+      <h3 id="env-variables">5.2 Required Environment Variables</h3>
+      <p>Configure these variables in <code>.env.prod</code>. Group them by category below.</p>
+
+      <h4>Service Configuration</h4>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Example</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>ENVIRONMENT</code></td>
+              <td><code>production</code></td>
+              <td>Must be set to "production" for prod mode</td>
+            </tr>
+            <tr>
+              <td><code>LOG_LEVEL</code></td>
+              <td><code>INFO</code></td>
+              <td>INFO or WARNING for production</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Database Configuration</h4>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Example</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>TURING_PG_USER</code></td>
+              <td><code>turing</code></td>
+              <td>Postgres username</td>
+            </tr>
+            <tr>
+              <td><code>TURING_PG_PASSWORD</code></td>
+              <td><code>(strong random)</code></td>
+              <td>Generate with: <code>openssl rand -base64 24</code></td>
+            </tr>
+            <tr>
+              <td><code>TURING_PG_DB</code></td>
+              <td><code>turing_db</code></td>
+              <td>Database name</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Redis Configuration</h4>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Example</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>TURING_REDIS_PASSWORD</code></td>
+              <td><code>(strong random)</code></td>
+              <td>Generate with: <code>openssl rand -base64 24</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Authentication</h4>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Example</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>ADMIN_API_KEY</code></td>
+              <td><code>(strong random)</code></td>
+              <td>X-Admin-Key header for admin endpoints. Generate with: <code>openssl rand -hex 32</code></td>
+            </tr>
+            <tr>
+              <td><code>OPERATOR_PASSWORD</code></td>
+              <td><code>(strong password)</code></td>
+              <td>Frontend console login password</td>
+            </tr>
+            <tr>
+              <td><code>OPERATOR_SESSION_SECRET</code></td>
+              <td><code>(64 hex chars)</code></td>
+              <td>Generate with: <code>openssl rand -hex 32</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Voice Engine Integration</h4>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Example</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>VOICE_ENGINE_API_KEY</code></td>
+              <td><code>bn-xxxx...</code></td>
+              <td>Bolna API key from dashboard</td>
+            </tr>
+            <tr>
+              <td><code>VOICE_ENGINE_BASE_URL</code></td>
+              <td><code>https://api.bolna.ai</code></td>
+              <td>Bolna API base URL</td>
+            </tr>
+            <tr>
+              <td><code>TURING_PUBLIC_URL</code></td>
+              <td><code>https://turing.docstribe.com</code></td>
+              <td>Your public domain. Bolna sends webhooks here.</td>
+            </tr>
+            <tr>
+              <td><code>VOICE_WEBHOOK_ALLOWED_IPS</code></td>
+              <td><code>13.203.39.153</code></td>
+              <td>Bolna's egress IP for webhook validation</td>
+            </tr>
+            <tr>
+              <td><code>VOICE_DEFAULT_FROM_NUMBER</code></td>
+              <td><code>+91XXXXXXXXXX</code></td>
+              <td>Default caller ID in E.164 format</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Frontend Configuration</h4>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Example</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>CONSOLE_PUBLIC_URL</code></td>
+              <td><code>https://turing.docstribe.com</code></td>
+              <td>Used in client claim links</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>LLM & Call Analysis <span class="badge badge-optional">Optional</span></h4>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Example</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>LLM_PROVIDER</code></td>
+              <td><code>openai</code></td>
+              <td><code>openai</code> or <code>anthropic</code></td>
+            </tr>
+            <tr>
+              <td><code>OPENAI_API_KEY</code></td>
+              <td><code>sk-proj-xxx</code></td>
+              <td>For call transcription and analysis</td>
+            </tr>
+            <tr>
+              <td><code>ENCRYPTION_KEY</code></td>
+              <td><code>(Fernet key)</code></td>
+              <td>For per-client LLM key encryption. Generate: <code>python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>SQL Agent <span class="badge badge-optional">Optional</span></h4>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Example</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>SQL_AGENT_CONTROL_DB_URL</code></td>
+              <td>(empty)</td>
+              <td>Leave empty to disable. Set to enable SQL Builder Agent.</td>
+            </tr>
+            <tr>
+              <td><code>KALAAM_READONLY_DATABASE_URL</code></td>
+              <td>(empty)</td>
+              <td>Leave empty to disable. Set to enable Kalaam SQL queries.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Section 6: Deploy -->
+    <section id="deploy">
+      <h2>Deploy</h2>
+
+      <h3 id="deploy-infrastructure">6.1 Start Infrastructure</h3>
+      <p>Start PostgreSQL and Redis first (they take a few seconds to initialize):</p>
+      <pre>cd ~/turing_service
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d postgres redis</pre>
+      <p>Verify both containers are healthy:</p>
+      <pre>docker ps  # should show (healthy) within 30s</pre>
+
+      <h3 id="deploy-migrations">6.2 Run Database Migrations</h3>
+      <p>Create all tables and indexes:</p>
+      <pre>docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm migrate</pre>
+      <p>This creates 13 tables including: <code>clients</code>, <code>calls</code>, <code>batches</code>, <code>agent_catalog</code>, and more.</p>
+
+      <h3 id="deploy-services">6.3 Start Backend + Frontend</h3>
+      <pre>docker compose -f docker-compose.prod.yml --env-file .env.prod up -d</pre>
+
+      <h3 id="deploy-verify">6.4 Verify Deployment</h3>
+      <p>Check all containers are healthy:</p>
+      <pre>docker ps  # All 4 containers should show (healthy)</pre>
+      <p>Test backend liveness:</p>
+      <pre>curl http://localhost:8005/health</pre>
+      <p>Test backend readiness (DB connected):</p>
+      <pre>curl http://localhost:8005/health/ready</pre>
+      <p>Test frontend (should return 200):</p>
+      <pre>curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/login</pre>
+      <div class="callout callout-info">
+        <strong>Note:</strong> Frontend may take 1-2 minutes to build on first run. Check logs with <code>docker logs -f turing-prod-frontend</code>.
+      </div>
+    </section>
+
+    <!-- Section 7: SSL/TLS with Caddy -->
+    <section id="ssl-tls">
+      <h2>SSL/TLS with Caddy</h2>
+      <p>Caddy automatically provisions Let's Encrypt certificates and handles HTTPS termination, proxying to the backend on localhost:8005 and frontend on localhost:3001.</p>
+
+      <h3 id="caddy-install">7.1 Install Caddy</h3>
+      <pre>sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install caddy</pre>
+
+      <h3 id="caddy-config">7.2 Configure Caddyfile</h3>
+      <pre>sudo tee /etc/caddy/Caddyfile << 'EOF'
+turing.docstribe.com {
+    # Frontend (console UI)
+    reverse_proxy localhost:3001
+
+    # Backend API + webhooks (direct access)
+    handle /v1/* {
+        reverse_proxy localhost:8005
+    }
+    handle /health* {
+        reverse_proxy localhost:8005
+    }
+    handle /webhooks/* {
+        reverse_proxy localhost:8005
+    }
+    handle /docs {
+        reverse_proxy localhost:8005
+    }
+    handle /openapi.json {
+        reverse_proxy localhost:8005
+    }
+}
+EOF
+sudo systemctl restart caddy</pre>
+      <p>Caddy will automatically request and install a Let's Encrypt certificate for your domain.</p>
+      <div class="callout callout-info">
+        <strong>Verify SSL:</strong> Visit <code>https://turing.docstribe.com/health</code> in your browser. You should see a JSON response with no SSL warnings.
+      </div>
+    </section>
+
+    <!-- Section 8: Webhook Integration -->
+    <section id="webhook-integration">
+      <h2>Webhook Integration</h2>
+
+      <h3 id="webhook-flow">8.1 How It Works</h3>
+      <ul>
+        <li>When placing calls/batches, the backend sends <code>TURING_PUBLIC_URL</code> to Bolna as the callback URL</li>
+        <li>Bolna sends status updates (answered, completed, failed, etc.) to <code>{TURING_PUBLIC_URL}/webhooks/voice</code></li>
+        <li>The webhook handler validates the source IP against <code>VOICE_WEBHOOK_ALLOWED_IPS</code></li>
+        <li>On validation, the webhook updates the call status in the DB and triggers outcome notifications</li>
+        <li>Terminal states (completed, failed, no_answer) trigger optional LLM-based call analysis</li>
+      </ul>
+
+      <h3 id="webhook-verify">8.2 Verify Webhook Endpoint</h3>
+      <p>Test that your webhook endpoint is publicly accessible (from your local machine):</p>
+      <pre>curl -X POST https://turing.docstribe.com/webhooks/voice \
+  -H "Content-Type: application/json" \
+  -d '{"id": "test-123", "status": "completed"}'
+# Should return 422 (validation failed) or 200 (success)</pre>
+      <p>A 422 response means the endpoint is reachable but the payload is unrecognized (expected for test data).</p>
+
+      <h3 id="webhook-bolna">8.3 Bolna Dashboard Configuration</h3>
+      <p>No manual webhook URL configuration needed. The backend automatically sends <code>TURING_PUBLIC_URL</code> as the callback URL when creating calls via the Bolna API. Verify in Bolna dashboard that the webhook is being triggered for your calls.</p>
+    </section>
+
+    <!-- Section 9: Client Onboarding -->
+    <section id="client-onboarding">
+      <h2>Client Onboarding</h2>
+      <p>After deployment, register and enable your first client.</p>
+
+      <h3 id="client-register">9.1 Register First Client</h3>
+      <pre>curl -X POST https://turing.docstribe.com/v1/register \
+  -H "Content-Type: application/json" \
+  -d '{"name": "kalaam-continental", "contact_email": "ops@continental.hospital"}'</pre>
+
+      <h3 id="client-approve">9.2 Approve Client</h3>
+      <pre>curl -X POST https://turing.docstribe.com/v1/admin/clients/{client_id}/approve \
+  -H "X-Admin-Key: YOUR_ADMIN_KEY"</pre>
+
+      <h3 id="client-agents">9.3 Enable Agents</h3>
+      <p>Sync agents from Bolna and enable them for the client:</p>
+      <pre>
+# Sync agents from Bolna
+curl -X POST https://turing.docstribe.com/v1/admin/agents/sync \
+  -H "X-Admin-Key: YOUR_ADMIN_KEY"
+
+# Enable specific agents for the client
+curl -X PUT https://turing.docstribe.com/v1/admin/clients/{client_id}/agents \
+  -H "X-Admin-Key: YOUR_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_ids": ["agent-uuid-1", "agent-uuid-2"]}'</pre>
+
+      <h3 id="client-api-key">9.4 Client Gets API Key</h3>
+      <p>Clients can claim their API key via the console, or you can generate one:</p>
+      <pre>curl -X POST https://turing.docstribe.com/v1/admin/clients/{client_id}/keys \
+  -H "X-Admin-Key: YOUR_ADMIN_KEY"</pre>
+
+      <h3 id="client-kalaam">9.5 Update Kalaam Backend Configuration</h3>
+      <p>Set this in Kalaam's <code>.env</code>:</p>
+      <pre>TURING_BASE_URL=https://turing.docstribe.com</pre>
+    </section>
+
+    <!-- Section 10: Maintenance -->
+    <section id="maintenance">
+      <h2>Maintenance</h2>
+
+      <h3 id="maint-backup">10.1 Daily PostgreSQL Backups</h3>
+      <p>Set up a cron job to back up the database daily:</p>
+      <pre>mkdir -p ~/backups
+
+# Add to crontab (crontab -e):
+0 3 * * * docker exec turing-prod-postgres pg_dump -U turing turing_db | gzip > /home/$USER/backups/turing_$(date +\%Y\%m\%d).sql.gz</pre>
+
+      <h3 id="maint-update">10.2 Updating Code</h3>
+      <p>Deploy new versions with zero downtime:</p>
+      <pre>cd ~/turing_service
+git pull origin main
+docker compose -f docker-compose.prod.yml --env-file .env.prod build
+docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm migrate
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d</pre>
+
+      <h3 id="maint-logs">10.3 Viewing Logs</h3>
+      <p>Monitor services in real-time:</p>
+      <pre>
+# All services
+docker compose -f docker-compose.prod.yml logs -f
+
+# Backend only
+docker logs -f turing-prod-backend
+
+# Last 100 lines with timestamps
+docker logs --tail 100 -t turing-prod-backend</pre>
+
+      <h3 id="maint-restart">10.4 Restart Services</h3>
+      <pre>docker compose -f docker-compose.prod.yml --env-file .env.prod restart backend frontend</pre>
+    </section>
+
+    <!-- Section 11: Troubleshooting -->
+    <section id="troubleshooting">
+      <h2>Troubleshooting</h2>
+      <p>Common issues and their fixes:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Symptom</th>
+              <th>Cause</th>
+              <th>Fix</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Backend won't start</td>
+              <td>Missing or invalid env vars</td>
+              <td>Check <code>docker logs turing-prod-backend</code> — Pydantic will show which field is missing or invalid</td>
+            </tr>
+            <tr>
+              <td>"Operator login not configured"</td>
+              <td><code>OPERATOR_SESSION_SECRET</code> not set</td>
+              <td>Set <code>OPERATOR_SESSION_SECRET</code> in .env.prod, then restart frontend</td>
+            </tr>
+            <tr>
+              <td>Webhook returns 403</td>
+              <td>Source IP not in allowlist</td>
+              <td>Add Bolna's egress IP to <code>VOICE_WEBHOOK_ALLOWED_IPS</code> in .env.prod</td>
+            </tr>
+            <tr>
+              <td>Webhook returns 422 "cannot be attributed"</td>
+              <td>Call not in database or unknown execution ID</td>
+              <td>Verify the call was placed through Turing (check DB directly: <code>SELECT * FROM calls WHERE id='...';</code>)</td>
+            </tr>
+            <tr>
+              <td>Frontend returns 500 "backend not reachable"</td>
+              <td><code>TURING_API_URL</code> wrong at build time</td>
+              <td>Rebuild frontend with correct <code>TURING_API_URL=http://backend:8005</code></td>
+            </tr>
+            <tr>
+              <td>DB connection refused</td>
+              <td>PostgreSQL not healthy or not started</td>
+              <td>Run <code>docker ps</code>, check postgres logs with <code>docker logs turing-prod-postgres</code></td>
+            </tr>
+            <tr>
+              <td>"email-validator not installed"</td>
+              <td>Old Docker image without dependency</td>
+              <td>Rebuild backend: <code>docker compose -f docker-compose.prod.yml build backend</code></td>
+            </tr>
+            <tr>
+              <td>SSL cert not provisioning</td>
+              <td>DNS not pointed or port 80/443 blocked</td>
+              <td>Verify DNS A record points to static IP. Check firewall allows :80 and :443. Run <code>sudo systemctl status caddy</code> to see errors.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Section 12: Architecture Diagram -->
+    <section id="architecture">
+      <h2>Architecture Diagram</h2>
+      <p>High-level deployment topology:</p>
+      <div class="diagram">
+                        Internet
+                           |
+                           v
+                  +-------------------+
+                  | Caddy (SSL/TLS)   |  :443
+                  | Auto HTTPS        |  :80
+                  +-------+----+-------+
+                          |    |
+          +-------+--------+    +--------+-------+
+          |       |                     |       |
+          v       v                     v       v
+    +----------+        +----------+
+    | Frontend |        | Backend  |
+    |(Next.js) |------> |(FastAPI) |
+    | :3001    |        | :8005    |
+    +----------+        +---+---+--+
+                            |   |
+            +-------+--------+   +--------+-------+
+            |       |                    |       |
+            v       v                    v       v
+      +----------+              +----------+
+      |PostgreSQL|              |  Redis   |
+      |(pgvector)|              |  (auth)  |
+      | :5432    |              | :6379    |
+      +----------+              +----------+
+            |
+            | Volume: pgdata
+            | (persistent storage)</div>
+    </section>
+
+  </div>
+
+  <!-- Footer -->
+  <footer class="container">
+    <p>Turing Service Deployment Guide. For questions or issues, contact the ops team or file an issue in the repository.</p>
+  </footer>
+</body>
+</html>

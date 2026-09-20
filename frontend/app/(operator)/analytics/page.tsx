@@ -12,27 +12,29 @@ import type {
   TimeseriesPoint,
 } from "@/lib/types";
 
-const OUTCOME_KEYS = ["booking", "follow_up", "escalation", "not_interested", "no_output", "other", "not_reached"] as const;
-const OUTCOME_LABELS: Record<string, string> = {
-  booking: "Booking",
-  follow_up: "Follow-up",
-  escalation: "Escalation",
-  not_interested: "Not interested",
-  no_output: "No output",
-  other: "Other",
-  not_reached: "Not reached",
-};
-const OUTCOME_COLORS: Record<string, string> = {
-  booking: "var(--green)",
-  follow_up: "var(--accent)",
-  escalation: "var(--amber)",
-  not_interested: "var(--red)",
-  no_output: "var(--muted)",
-  other: "var(--muted)",
-  not_reached: "var(--muted)",
-};
+import {
+  dispositionColor,
+  orderedDispositions,
+  outcomeColor,
+  outcomeLabel,
+  rankedOutcomes,
+} from "@/lib/outcomes";
+import type { OutcomeBreakdown } from "@/lib/types";
 
 function pct(v: number) { return `${(v * 100).toFixed(1)}%`; }
+
+/** A disposition key is absent when its count is zero, so missing reads as 0%. */
+function dispositionPct(outcomes: OutcomeBreakdown, status: string) {
+  if (outcomes.analyzed_count === 0) return "—";
+  return pct(outcomes.by_disposition_status[status]?.pct_of_analyzed ?? 0);
+}
+/** "Converted" is the doc's Booking + Visited outcomes combined. */
+function convertedPct(outcomes: OutcomeBreakdown) {
+  if (outcomes.analyzed_count === 0) return "—";
+  const booking = outcomes.by_disposition_status["Booking"]?.pct_of_analyzed ?? 0;
+  const visited = outcomes.by_disposition_status["Visited"]?.pct_of_analyzed ?? 0;
+  return pct(booking + visited);
+}
 function dur(s: number | null) { if (s == null) return "—"; const m = Math.floor(s / 60); return m ? `${m}m ${(s % 60).toFixed(0)}s` : `${s.toFixed(1)}s`; }
 function cost(v: number | null) { if (v == null) return "—"; return `$${v.toFixed(4)}`; }
 
@@ -50,33 +52,96 @@ function StatCard({ label, value, sub, color }: { label: string; value: string; 
 
 // ── Outcome bars ──────────────────────────────────────────────────────────────
 
-function OutcomeBars({ overview }: { overview: AnalyticsOverview }) {
-  const { outcomes } = overview;
+function BarRow({ label, entry, color, labelWidth }: {
+  label: string;
+  entry: { count: number; pct_of_analyzed: number };
+  color: string;
+  labelWidth: number;
+}) {
+  return (
+    <div className="outcome-bar-row">
+      <span
+        style={{ width: labelWidth, fontSize: 12, color: "var(--text)", flexShrink: 0 }}
+        title={label}
+      >
+        {label}
+      </span>
+      <div className="outcome-bar-track">
+        <div
+          className="outcome-bar-fill"
+          style={{ width: pct(entry.pct_of_analyzed), background: color }}
+        />
+      </div>
+      <span style={{ width: 50, fontSize: 12, color, textAlign: "right", flexShrink: 0 }}>{pct(entry.pct_of_analyzed)}</span>
+      <span className="muted" style={{ width: 40, fontSize: 12, textAlign: "right", flexShrink: 0 }}>{entry.count}</span>
+    </div>
+  );
+}
+
+function OutcomeBars({ outcomes }: { outcomes: OutcomeBreakdown }) {
+  const [showDetail, setShowDetail] = useState(false);
+
   if (outcomes.analyzed_count === 0) {
     return <p className="muted" style={{ fontSize: 13 }}>No analyzed calls in this period.</p>;
   }
+
+  const dispositions = orderedDispositions(outcomes.by_disposition_status);
+  const granular = rankedOutcomes(outcomes.by_call_outcome) as [
+    string,
+    { count: number; pct_of_analyzed: number },
+  ][];
+
   return (
     <div>
-      {OUTCOME_KEYS.map((key) => {
-        const entry = outcomes[key];
-        const color = OUTCOME_COLORS[key];
-        return (
-          <div key={key} className="outcome-bar-row">
-            <span style={{ width: 110, fontSize: 12, color: "var(--text)", flexShrink: 0 }}>{OUTCOME_LABELS[key]}</span>
-            <div className="outcome-bar-track">
-              <div
-                className="outcome-bar-fill"
-                style={{ width: pct(entry.pct_of_analyzed), background: color }}
-              />
-            </div>
-            <span style={{ width: 50, fontSize: 12, color, textAlign: "right", flexShrink: 0 }}>{pct(entry.pct_of_analyzed)}</span>
-            <span className="muted" style={{ width: 40, fontSize: 12, textAlign: "right", flexShrink: 0 }}>{entry.count}</span>
-          </div>
-        );
-      })}
+      {dispositions.length > 0 ? (
+        dispositions.map(([status, entry]) => (
+          <BarRow
+            key={status}
+            label={status}
+            entry={entry}
+            color={dispositionColor(status)}
+            labelWidth={110}
+          />
+        ))
+      ) : (
+        <p className="muted" style={{ fontSize: 12 }}>
+          No dispositions recorded for this period.
+        </p>
+      )}
+
       <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
         {outcomes.analyzed_count} analyzed · coverage {pct(outcomes.coverage_pct)} of terminal calls
       </p>
+
+      {granular.length > 0 && (
+        <>
+          <button
+            className="secondary"
+            style={{ fontSize: 12, padding: "4px 10px", marginTop: 4 }}
+            onClick={() => setShowDetail((open) => !open)}
+          >
+            {showDetail ? "Hide" : "Show"} outcome detail ({granular.length})
+          </button>
+
+          {showDetail && (
+            <div style={{ marginTop: 12 }}>
+              <p className="muted" style={{ fontSize: 11, marginTop: 0, marginBottom: 10 }}>
+                The same {outcomes.analyzed_count} calls broken down further — not
+                additional calls.
+              </p>
+              {granular.map(([key, entry]) => (
+                <BarRow
+                  key={key}
+                  label={outcomeLabel(key)}
+                  entry={entry}
+                  color={outcomeColor(key)}
+                  labelWidth={150}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -195,15 +260,14 @@ function AgentTable({ rows }: { rows: AgentStats[] }) {
             <th>Not conn.</th>
             <th>NC rate</th>
             <th>Avg dur.</th>
-            <th>Booking</th>
+            <th>Converted</th>
             <th>Escalation</th>
-            <th>Follow-up</th>
+            <th>Follow Up</th>
             <th>Cost</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => {
-            const hasOutcomes = r.outcomes.analyzed_count > 0;
             const ncRate = r.call_volume.total > 0
               ? r.call_volume.not_connected / r.call_volume.total
               : 0;
@@ -216,9 +280,9 @@ function AgentTable({ rows }: { rows: AgentStats[] }) {
                 <td style={{ color: "var(--red)" }}>{r.call_volume.not_connected}</td>
                 <td className="muted">{pct(ncRate)}</td>
                 <td className="muted">{dur(r.duration.avg_seconds)}</td>
-                <td>{hasOutcomes ? pct(r.outcomes.booking.pct_of_analyzed) : "—"}</td>
-                <td>{hasOutcomes ? pct(r.outcomes.escalation.pct_of_analyzed) : "—"}</td>
-                <td>{hasOutcomes ? pct(r.outcomes.follow_up.pct_of_analyzed) : "—"}</td>
+                <td>{convertedPct(r.outcomes)}</td>
+                <td>{dispositionPct(r.outcomes, "Escalation")}</td>
+                <td>{dispositionPct(r.outcomes, "Follow Up")}</td>
                 <td className="muted">{cost(r.cost.total)}</td>
               </tr>
             );
@@ -246,15 +310,14 @@ function BatchTable({ rows }: { rows: BatchStats[] }) {
             <th>Not conn.</th>
             <th>NC rate</th>
             <th>Avg dur.</th>
-            <th>Booking</th>
+            <th>Converted</th>
             <th>Escalation</th>
-            <th>Follow-up</th>
+            <th>Follow Up</th>
             <th>Cost</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => {
-            const hasOutcomes = r.outcomes.analyzed_count > 0;
             const ncRate = r.call_volume.total > 0
               ? r.call_volume.not_connected / r.call_volume.total
               : 0;
@@ -268,9 +331,9 @@ function BatchTable({ rows }: { rows: BatchStats[] }) {
                 <td style={{ color: "var(--red)" }}>{r.call_volume.not_connected}</td>
                 <td className="muted">{pct(ncRate)}</td>
                 <td className="muted">{dur(r.duration.avg_seconds)}</td>
-                <td>{hasOutcomes ? pct(r.outcomes.booking.pct_of_analyzed) : "—"}</td>
-                <td>{hasOutcomes ? pct(r.outcomes.escalation.pct_of_analyzed) : "—"}</td>
-                <td>{hasOutcomes ? pct(r.outcomes.follow_up.pct_of_analyzed) : "—"}</td>
+                <td>{convertedPct(r.outcomes)}</td>
+                <td>{dispositionPct(r.outcomes, "Escalation")}</td>
+                <td>{dispositionPct(r.outcomes, "Follow Up")}</td>
                 <td className="muted">{cost(r.cost.total)}</td>
               </tr>
             );
@@ -522,7 +585,7 @@ export default function AnalyticsPage() {
               {/* Outcomes */}
               <div className="card" style={{ marginTop: 16 }}>
                 <h2>Outcome breakdown</h2>
-                <OutcomeBars overview={overview} />
+                <OutcomeBars outcomes={overview.outcomes} />
               </div>
             </>
           )}
@@ -546,31 +609,41 @@ export default function AnalyticsPage() {
               <h2>Call volume over time</h2>
               <TimeseriesChart points={timeseries} />
 
-              {/* Timeseries outcome summary */}
-              {timeseries.length > 0 && Object.keys(timeseries[0].outcomes).length > 0 && (
-                <div style={{ marginTop: 20, overflowX: "auto" }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Total</th>
-                        <th>Connected</th>
-                        {OUTCOME_KEYS.map((k) => <th key={k}>{OUTCOME_LABELS[k]}</th>)}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {timeseries.map((p) => (
-                        <tr key={p.date}>
-                          <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{p.date.slice(0, 10)}</td>
-                          <td>{p.total}</td>
-                          <td>{p.connected}</td>
-                          {OUTCOME_KEYS.map((k) => <td key={k} className="muted">{p.outcomes[k] ?? 0}</td>)}
+              {/* Per-day disposition summary */}
+              {(() => {
+                // Columns are whichever dispositions appear anywhere in the
+                // range, in canonical order — nothing is hardcoded here.
+                const columns = orderedDispositions(
+                  Object.fromEntries(
+                    timeseries.flatMap((p) => Object.keys(p.by_disposition_status)).map((k) => [k, 0]),
+                  ),
+                ).map(([status]) => status);
+                if (columns.length === 0) return null;
+                return (
+                  <div style={{ marginTop: 20, overflowX: "auto" }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Total</th>
+                          <th>Connected</th>
+                          {columns.map((k) => <th key={k}>{k}</th>)}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                      </thead>
+                      <tbody>
+                        {timeseries.map((p) => (
+                          <tr key={p.date}>
+                            <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{p.date.slice(0, 10)}</td>
+                            <td>{p.total}</td>
+                            <td>{p.connected}</td>
+                            {columns.map((k) => <td key={k} className="muted">{p.by_disposition_status[k] ?? 0}</td>)}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </>

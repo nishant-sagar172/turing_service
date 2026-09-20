@@ -24,6 +24,9 @@ log = logging.getLogger(__name__)
 # Transient-transport retry budget. Applied to idempotent requests only; see
 # ``VoiceEngineClient.request``.
 _MAX_TRANSPORT_ATTEMPTS = 3
+# Documented maximum for the v2 executions endpoint; one page covers most batches.
+_EXECUTIONS_PAGE_SIZE = 1000
+_EXECUTIONS_MAX_PAGES = 100
 _RETRY_BACKOFF_S = 0.5
 
 
@@ -220,8 +223,43 @@ class VoiceEngineClient:
         return await self.request("GET", f"/batches/{batch_id}")
 
     async def get_batch_executions(self, batch_id: str) -> Any:
-        """GET /batches/{batch_id}/executions — per-call results in a batch."""
-        return await self.request("GET", f"/batches/{batch_id}/executions")
+        """GET /v2/batches/{batch_id}/executions — per-call results, paginated.
+
+        v1 returns a bare array with no documented cap, so a large batch could
+        silently reconcile short. Returns the flattened list, so callers are
+        unchanged.
+        """
+        items: list[Any] = []
+        for page in range(1, _EXECUTIONS_MAX_PAGES + 1):
+            result = await self.request(
+                "GET",
+                f"/v2/batches/{batch_id}/executions",
+                params={"page_number": page, "page_size": _EXECUTIONS_PAGE_SIZE},
+            )
+            if not isinstance(result, dict):
+                # Unexpected shape: hand back whatever v1-style body arrived.
+                return result if page == 1 else items
+            data = result.get("data")
+            if isinstance(data, list):
+                items.extend(data)
+            elif "has_more" not in result:
+                # Neither a results page nor a pagination envelope — warn instead
+                # of silently reconciling the batch as zero calls.
+                log.warning(
+                    "batch %s executions: unexpected response shape (keys=%s); "
+                    "treating as empty",
+                    batch_id,
+                    sorted(result),
+                )
+                return items
+            if not result.get("has_more"):
+                return items
+        log.warning(
+            "batch %s executions stopped at the %d-page cap",
+            batch_id,
+            _EXECUTIONS_MAX_PAGES,
+        )
+        return items
 
     async def stop_batch(self, batch_id: str) -> Any:
         """POST /batches/{batch_id}/stop — halt a queued/running batch."""

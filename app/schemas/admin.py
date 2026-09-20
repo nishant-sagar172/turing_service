@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.services.workflows import WORKFLOW_CODE_PATTERN
+
 
 class CreateClientRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
@@ -72,6 +74,10 @@ class ClientConfigUpdate(BaseModel):
     analysis_prompt_hint: str | None = None
     # Write-only: stored encrypted, never returned in responses
     analysis_llm_api_key: str | None = None
+    # Optional — null clears it and classification falls back to the common set.
+    default_workflow_code: str | None = Field(
+        default=None, pattern=WORKFLOW_CODE_PATTERN
+    )
 
 
 class ClientConfigResponse(BaseModel):
@@ -84,6 +90,7 @@ class ClientConfigResponse(BaseModel):
     analysis_llm_model: str | None
     analysis_prompt_hint: str | None
     analysis_llm_api_key_set: bool
+    default_workflow_code: str | None
 
 
 class SetAgentsRequest(BaseModel):

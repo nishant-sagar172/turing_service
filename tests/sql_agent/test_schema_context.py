@@ -26,7 +26,9 @@ def test_pruned_table_subset_keeps_selected_column_values() -> None:
         },
     )
 
-    assert "Available columns: action_type, revenue_potential, status, urgency" in subset
+    assert (
+        "Available columns: action_type, revenue_potential, status, urgency" in subset
+    )
     assert "values: cancelled, completed, pending, scheduled" in subset
     assert "values: follow_up, ip_admission, lab_test, medication" in subset
     assert "- title -" not in subset

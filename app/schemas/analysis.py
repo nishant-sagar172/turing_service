@@ -13,7 +13,10 @@ if TYPE_CHECKING:
 
 
 class CallAnalysisResult(BaseModel):
-    outcome: str
+    call_outcome: str | None = None
+    disposition_status: str | None = None
+    sub_status: str | None = None
+    workflow_code: str | None = None
     summary: str | None
     reason: str | None
     requests: list[str]
@@ -28,7 +31,10 @@ class CallAnalysisResult(BaseModel):
         if analysis is None:
             return None
         return cls(
-            outcome=analysis.outcome,
+            call_outcome=analysis.call_outcome,
+            disposition_status=analysis.disposition_status,
+            sub_status=analysis.sub_status,
+            workflow_code=analysis.workflow_code,
             summary=analysis.summary,
             reason=analysis.reason,
             requests=analysis.requests or [],

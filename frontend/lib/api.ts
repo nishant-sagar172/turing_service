@@ -25,6 +25,7 @@ import type {
   MeResponse,
   PhoneNumbersResponse,
   ScheduleBatchResponse,
+  WorkflowOption,
   TimeseriesPoint,
 } from "./types";
 
@@ -49,6 +50,8 @@ function req<T>(path: string, opts: { method?: string; body?: string } = {}): Pr
 
 export const api = {
   health: () => req<HealthResponse>("/health"),
+  /** Open endpoint — no tenant key required, so the operator console can read it too. */
+  workflows: () => req<WorkflowOption[]>("/v1/workflows"),
   phoneNumbers: () => req<PhoneNumbersResponse>("/v1/phone-numbers"),
   agents: () => req<Agent[]>("/v1/agents"),
   agentVariables: (id: string) => req<AgentVariables>(`/v1/agents/${id}/variables`),
@@ -76,7 +79,7 @@ export const api = {
     req<{ message?: string; state?: string }>(`/v1/batches/${id}`, { method: "DELETE" }),
 
   // Call records (paginated list + detail + on-demand analysis)
-  listCalls: (params: { page?: number; page_size?: number; status?: string; outcome?: string; urgency?: string; q?: string; agent_id?: string; batch_id?: string; date_from?: string; date_to?: string } = {}) =>
+  listCalls: (params: { page?: number; page_size?: number; status?: string; outcome?: string; call_outcome?: string; disposition_status?: string; urgency?: string; q?: string; agent_id?: string; batch_id?: string; date_from?: string; date_to?: string } = {}) =>
     req<CallListResponse>(`/v1/calls${qs(params)}`),
   getCallDetail: (id: string) => req<CallDetail>(`/v1/calls/${id}`),
   analyzeCall: (id: string) =>

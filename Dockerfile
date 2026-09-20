@@ -25,7 +25,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8005/health || exit 1
+    CMD curl -f http://localhost:8005/health/ready || exit 1
 
 EXPOSE 8005
 

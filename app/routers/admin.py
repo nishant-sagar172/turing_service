@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import math
 import uuid
+from typing import Any
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -34,6 +35,7 @@ from app.db.models import (
     CallAnalysis,
     Client,
     ClientApiKey,
+    ClientConfig,
 )
 from app.db.session import get_session
 from app.dependencies import get_redis, get_voice_engine
@@ -71,6 +73,7 @@ from app.schemas.analytics import (
     BatchStats,
     TimeseriesPoint,
 )
+from app.schemas.calls import MakeCallRequest, MakeCallResponse
 from app.schemas.common import VoiceEngineStatusResponse
 from app.services import (
     agent_sync,
@@ -80,6 +83,7 @@ from app.services import (
 )
 from app.services import claim_links as cl
 from app.services.analysis import analyze_call as _analyze_call
+from app.services.call_placement import place_call
 from app.services.store import get_call_by_voice_id
 from app.services.variables import resolve_variables
 
@@ -164,7 +168,7 @@ async def update_client(
     return ClientSummary.model_validate(updated, from_attributes=True)
 
 
-@router.delete("/clients/{client_id}", status_code=204)
+@router.delete("/clients/{client_id}", status_code=204, response_model=None)
 async def delete_client(
     client_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -177,7 +181,7 @@ async def delete_client(
 async def approve_client(
     client_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    redis=Depends(get_redis),
+    redis: Any = Depends(get_redis),
     settings: Settings = Depends(get_settings),
 ) -> ApproveResponse:
     client = await _get_client_or_404(session, client_id)
@@ -203,7 +207,7 @@ async def approve_client(
                 raw_key=raw_key,
                 ttl_hours=settings.claim_link_ttl_hours,
             )
-            if token:
+            if token and settings.console_public_url:
                 claim_url = cl.build_claim_url(settings.console_public_url, token)
         except Exception as exc:
             log.warning("claim link creation failed for client %s: %s", client_id, exc)
@@ -271,7 +275,9 @@ async def issue_key(
     return IssueKeyResponse(key_id=key_row.id, api_key=raw_key)
 
 
-@router.delete("/clients/{client_id}/keys/{key_id}", status_code=204)
+@router.delete(
+    "/clients/{client_id}/keys/{key_id}", status_code=204, response_model=None
+)
 async def revoke_key(
     client_id: uuid.UUID,
     key_id: uuid.UUID,
@@ -289,7 +295,7 @@ async def revoke_key(
 # ── Config ────────────────────────────────────────────────────────────────────
 
 
-def _config_response(config) -> ClientConfigResponse:
+def _config_response(config: ClientConfig | None) -> ClientConfigResponse:
     if config is None:
         return ClientConfigResponse(
             default_from_number=None,
@@ -301,6 +307,7 @@ def _config_response(config) -> ClientConfigResponse:
             analysis_llm_model=None,
             analysis_prompt_hint=None,
             analysis_llm_api_key_set=False,
+            default_workflow_code=None,
         )
     return ClientConfigResponse(
         default_from_number=config.default_from_number,
@@ -312,6 +319,7 @@ def _config_response(config) -> ClientConfigResponse:
         analysis_llm_model=config.analysis_llm_model,
         analysis_prompt_hint=config.analysis_prompt_hint,
         analysis_llm_api_key_set=bool(config.analysis_llm_api_key_enc),
+        default_workflow_code=config.default_workflow_code,
     )
 
 
@@ -543,7 +551,7 @@ async def get_client_agents(
     ]
 
 
-@router.put("/clients/{client_id}/agents", status_code=204)
+@router.put("/clients/{client_id}/agents", status_code=204, response_model=None)
 async def set_client_agents(
     client_id: uuid.UUID,
     body: SetAgentsRequest,
@@ -563,7 +571,9 @@ async def set_client_agents(
     await agent_sync.set_client_agents(session, client_id, body.voice_agent_ids)
 
 
-@router.patch("/clients/{client_id}/agents/{voice_agent_id}", status_code=204)
+@router.patch(
+    "/clients/{client_id}/agents/{voice_agent_id}", status_code=204, response_model=None
+)
 async def patch_client_agent(
     client_id: uuid.UUID,
     voice_agent_id: str,
@@ -600,7 +610,11 @@ async def get_drift(
     ]
 
 
-@router.post("/clients/{client_id}/drift/{event_id}/acknowledge", status_code=204)
+@router.post(
+    "/clients/{client_id}/drift/{event_id}/acknowledge",
+    status_code=204,
+    response_model=None,
+)
 async def acknowledge_drift(
     client_id: uuid.UUID,
     event_id: uuid.UUID,
@@ -704,7 +718,7 @@ async def get_client_phone_numbers(
     ]
 
 
-@router.put("/clients/{client_id}/phone-numbers", status_code=204)
+@router.put("/clients/{client_id}/phone-numbers", status_code=204, response_model=None)
 async def set_client_phone_numbers(
     client_id: uuid.UUID,
     body: SetPhoneNumbersRequest,
@@ -731,20 +745,46 @@ async def set_client_phone_numbers(
 # ── Admin calls ───────────────────────────────────────────────────────────────
 
 
-def _admin_call_analysis(analysis: CallAnalysis | None) -> CallAnalysisResult | None:
-    if analysis is None:
-        return None
-    return CallAnalysisResult(
-        outcome=analysis.outcome,
-        summary=analysis.summary,
-        reason=analysis.reason,
-        requests=analysis.requests or [],
-        urgency=analysis.urgency,
-        confidence=analysis.confidence,
-        symptoms_reported=analysis.symptoms_reported or [],
-        model_used=analysis.model_used,
-        analyzed_at=analysis.analyzed_at,
+@router.post(
+    "/clients/{client_id}/calls", response_model=MakeCallResponse, status_code=201
+)
+async def admin_make_call(
+    client_id: uuid.UUID,
+    body: MakeCallRequest,
+    validate: bool | None = None,
+    session: AsyncSession = Depends(get_session),
+    voice_engine: VoiceEngineClient = Depends(get_voice_engine),
+    settings: Settings = Depends(get_settings),
+) -> MakeCallResponse:
+    """Place a call on a client's behalf from the operator console.
+
+    Mirrors ``POST /v1/calls`` — the operator session carries no tenant API key,
+    so the client is named in the path instead of resolved from one.
+    """
+    client = await _get_client_or_404(session, client_id)
+    # The tenant path rejects non-active clients during key auth (app/auth.py);
+    # naming the client in the path bypasses that, so re-assert it here.
+    if client.status != "active":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "client_inactive",
+                "message": f"Client is '{client.status}'. Calls can only be "
+                "placed for active clients.",
+            },
+        )
+    return await place_call(
+        session,
+        client_id=client_id,
+        body=body,
+        voice_engine=voice_engine,
+        settings=settings,
+        validate=validate,
     )
+
+
+def _admin_call_analysis(analysis: CallAnalysis | None) -> CallAnalysisResult | None:
+    return CallAnalysisResult.from_model(analysis)
 
 
 async def _admin_from_number(session: AsyncSession, call: Call) -> str | None:
@@ -755,8 +795,8 @@ async def _admin_from_number(session: AsyncSession, call: Call) -> str | None:
     the detail route's loader does not populate the relationship, so touching
     ``call.batch`` there would lazy-load and raise MissingGreenlet under async.
     """
-    if call.batch_id is None:
-        return None
+    if call.from_number is not None or call.batch_id is None:
+        return call.from_number
     batch = await session.get(Batch, call.batch_id)
     return batch.from_number if batch else None
 
@@ -767,7 +807,12 @@ async def admin_list_client_calls(
     agent_id: str | None = Query(default=None),
     batch_id: uuid.UUID | None = Query(default=None),
     status: str | None = Query(default=None),
-    outcome: str | None = Query(default=None),
+    call_outcome: str | None = Query(
+        default=None, description="Granular call outcome, e.g. 'scheduled_booking'."
+    ),
+    disposition_status: str | None = Query(
+        default=None, description="Disposition status, e.g. 'Follow Up'."
+    ),
     urgency: str | None = Query(default=None),
     q: str | None = Query(
         default=None, description="Substring search on contact number."
@@ -786,8 +831,10 @@ async def admin_list_client_calls(
         filters.append(Call.batch_id == batch_id)
     if status:
         filters.append(Call.status == status)
-    if outcome:
-        filters.append(CallAnalysis.outcome == outcome)
+    if call_outcome:
+        filters.append(CallAnalysis.call_outcome == call_outcome)
+    if disposition_status:
+        filters.append(CallAnalysis.disposition_status == disposition_status)
     if urgency:
         filters.append(CallAnalysis.urgency == urgency)
     if q:
@@ -797,7 +844,7 @@ async def admin_list_client_calls(
     if date_to:
         filters.append(Call.created_at <= date_to)
 
-    needs_analysis_join = bool(outcome or urgency)
+    needs_analysis_join = bool(call_outcome or disposition_status or urgency)
 
     count_query = select(func.count()).select_from(Call)
     # Eager-load `batch` alongside `analysis`: this listing pages up to 200 rows
@@ -827,7 +874,8 @@ async def admin_list_client_calls(
                 agent_id=call.agent_id,
                 batch_id=call.batch_id,
                 contact_number=call.contact_number,
-                from_number=call.batch.from_number if call.batch else None,
+                from_number=call.from_number
+                or (call.batch.from_number if call.batch else None),
                 status=call.status,
                 duration=call.duration,
                 cost=call.cost,
@@ -920,14 +968,6 @@ async def admin_analyze_call(
                 "message": "LLM analysis failed. Check API key configuration.",
             },
         )
-    return CallAnalysisResult(
-        outcome=analysis.outcome,
-        summary=analysis.summary,
-        reason=analysis.reason,
-        requests=analysis.requests or [],
-        urgency=analysis.urgency,
-        confidence=analysis.confidence,
-        symptoms_reported=analysis.symptoms_reported or [],
-        model_used=analysis.model_used,
-        analyzed_at=analysis.analyzed_at,
-    )
+    result = CallAnalysisResult.from_model(analysis)
+    assert result is not None  # analysis is non-None here
+    return result

@@ -57,6 +57,7 @@ export interface MakeCallRequest {
   from_phone_number?: string;
   user_data?: Record<string, unknown>;
   scheduled_at?: string;
+  workflow_code?: string;
 }
 
 export interface MakeCallResponse {
@@ -84,7 +85,18 @@ export interface CreateBatchRequest {
   agent_id: string;
   recipients: Record<string, unknown>[];
   from_phone_numbers?: string[];
+  /** Optional. Omit to fall back to the client default, then the common set. */
+  workflow_code?: string;
   webhook_url?: string;
+}
+
+/** Selectable calling workflow, served from the backend registry.
+ *  `workflow_code` mirrors Kalaam's workflows.workflow_code. */
+export interface WorkflowOption {
+  workflow_code: string;
+  label: string;
+  description: string;
+  is_default: boolean;
 }
 
 export interface BatchCreateResponse {
@@ -148,6 +160,8 @@ export interface ClientConfig {
   analysis_prompt_hint?: string | null;
   analysis_llm_api_key_set?: boolean;
   analysis_llm_api_key?: string | null;
+  /** Fallback workflow for batches that do not set one, and for single calls. */
+  default_workflow_code?: string | null;
 }
 
 export interface CatalogAgent {
@@ -255,7 +269,10 @@ export interface MeResponse {
 // ── Analysis types ────────────────────────────────────────────────────────────
 
 export interface CallAnalysisResult {
-  outcome: string;
+  call_outcome: string | null;
+  disposition_status: string | null;
+  sub_status: string | null;
+  workflow_code: string | null;
   summary: string | null;
   reason: string | null;
   requests: string[];
@@ -324,16 +341,16 @@ export interface OutcomeCount {
   pct_of_analyzed: number;
 }
 
+/**
+ * Two resolutions of the same analysed calls, keyed by the values present in
+ * the data so the taxonomy can grow without a type change. `by_disposition_status`
+ * is the rollup of `by_call_outcome` — summing the two together double-counts.
+ */
 export interface OutcomeBreakdown {
   analyzed_count: number;
   coverage_pct: number;
-  booking: OutcomeCount;
-  escalation: OutcomeCount;
-  not_interested: OutcomeCount;
-  no_output: OutcomeCount;
-  follow_up: OutcomeCount;
-  other: OutcomeCount;
-  not_reached: OutcomeCount;
+  by_call_outcome: Record<string, OutcomeCount>;
+  by_disposition_status: Record<string, OutcomeCount>;
 }
 
 export interface RetryStats {
@@ -380,7 +397,9 @@ export interface TimeseriesPoint {
   total: number;
   connected: number;
   not_connected: number;
-  outcomes: Record<string, number>;
+  by_call_outcome: Record<string, number>;
+  /** The business rollup of `by_call_outcome` — the same calls, not extra ones. */
+  by_disposition_status: Record<string, number>;
 }
 
 // ── Claim / registration types ───────────────────────────────────────────────

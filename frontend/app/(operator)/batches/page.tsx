@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { adminApi } from "@/lib/adminApi";
 import { getApiKey } from "@/lib/session";
 import AgentSelect from "@/components/AgentSelect";
-import type { BatchStats, ClientAgent, ClientSummary, CreateBatchRequest, PhoneNumbersResponse } from "@/lib/types";
+import type { BatchStats, ClientAgent, ClientSummary, CreateBatchRequest, PhoneNumbersResponse, WorkflowOption } from "@/lib/types";
 
 function toOffsetIso(local: string): string {
   const d = new Date(local);
@@ -70,6 +70,21 @@ export default function BatchesPage() {
     api.phoneNumbers().then(setNumbers).catch(() => {});
   }, [isAdmin, modeReady]);
 
+  // Options come from the backend registry, so a newly registered task type
+  // appears here with no frontend change.
+  const [workflows, setWorkflows] = useState<WorkflowOption[]>([]);
+  const [workflowsError, setWorkflowsError] = useState<string | null>(null);
+  const [workflowCode, setWorkflowCode] = useState("");
+  useEffect(() => {
+    if (!modeReady) return;
+    api
+      .workflows()
+      .then(setWorkflows)
+      .catch((e) =>
+        setWorkflowsError(e instanceof Error ? e.message : String(e)),
+      );
+  }, [modeReady]);
+
   // Create batch (tenant-only)
   const [agentId, setAgentId] = useState("");
   const [fromNumber, setFromNumber] = useState("");
@@ -128,6 +143,7 @@ export default function BatchesPage() {
         agent_id: agentId.trim(),
         recipients: parsed,
         ...(fromNumber ? { from_phone_numbers: [fromNumber] } : {}),
+        ...(workflowCode ? { workflow_code: workflowCode } : {}),
         ...(webhookUrl ? { webhook_url: webhookUrl.trim() } : {}),
       };
       const res = await api.createBatch(body);
@@ -213,6 +229,26 @@ export default function BatchesPage() {
                 </select>
               </div>
             </div>
+            {workflowsError && (
+              <p style={{ fontSize: 11, color: "var(--red)", margin: "4px 0 0" }}>
+                Could not load workflows — {workflowsError}
+              </p>
+            )}
+            {workflows.length > 0 && (
+              <>
+                <label>Workflow (optional)</label>
+                <select value={workflowCode} onChange={(e) => setWorkflowCode(e.target.value)}>
+                  <option value="">Not specified — use client default</option>
+                  {workflows.map((t) => (
+                    <option key={t.workflow_code} value={t.workflow_code}>{t.label}</option>
+                  ))}
+                </select>
+                <p className="hint">
+                  {workflows.find((t) => t.workflow_code === workflowCode)?.description
+                    ?? "Decides which call outcomes the classifier may assign."}
+                </p>
+              </>
+            )}
             <label>Webhook URL (optional)</label>
             <input value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder="https://…/webhook" />
             <label>Recipients (JSON array; each needs contact_number)</label>
@@ -300,7 +336,7 @@ export default function BatchesPage() {
                   <th>Total</th>
                   <th>Connected</th>
                   <th>Rate</th>
-                  <th>Booking</th>
+                  <th>Converted</th>
                   <th>Escalation</th>
                   <th>Scheduled</th>
                   <th></th>
@@ -318,8 +354,8 @@ export default function BatchesPage() {
                     <td>{b.call_volume.total}</td>
                     <td>{b.call_volume.connected}</td>
                     <td>{pct(b.call_volume.connection_rate)}</td>
-                    <td>{b.outcomes.analyzed_count > 0 ? b.outcomes.booking.count : "—"}</td>
-                    <td>{b.outcomes.analyzed_count > 0 ? b.outcomes.escalation.count : "—"}</td>
+                    <td>{b.outcomes.analyzed_count > 0 ? ((b.outcomes.by_disposition_status["Booking"]?.count ?? 0) + (b.outcomes.by_disposition_status["Visited"]?.count ?? 0)) : "—"}</td>
+                    <td>{b.outcomes.analyzed_count > 0 ? (b.outcomes.by_disposition_status["Escalation"]?.count ?? 0) : "—"}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.scheduled_at ? b.scheduled_at.slice(0, 16) : "—"}</td>
                     <td>
                       {b.batch_id && (
