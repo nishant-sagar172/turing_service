@@ -118,6 +118,11 @@ _OUTCOME_DEFS_TAIL = """
 - waiting_doctor_confirmation: Doctor's final go-ahead still pending.
   Signals: "doctor se puchna hai", "doctor ne abhi nahi bola"
 
+- waiting_referral_letter: A referral document (e.g. from the primary doctor \
+or insurer) is still required before proceeding.
+  Signals: "referral letter nahi aaya", "insurer se letter chahiye", \
+"referral chahiye hoga"
+
 - wants_second_opinion: Patient wants another doctor's opinion before deciding.
   Signals: "doosre doctor se dikhayenge", "second opinion lena hai"
 

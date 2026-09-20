@@ -354,7 +354,7 @@ export default function BatchesPage() {
                     <td>{b.call_volume.total}</td>
                     <td>{b.call_volume.connected}</td>
                     <td>{pct(b.call_volume.connection_rate)}</td>
-                    <td>{b.outcomes.analyzed_count > 0 ? (b.outcomes.by_disposition_status["Converted"]?.count ?? 0) : "—"}</td>
+                    <td>{b.outcomes.analyzed_count > 0 ? ((b.outcomes.by_disposition_status["Booking"]?.count ?? 0) + (b.outcomes.by_disposition_status["Visited"]?.count ?? 0)) : "—"}</td>
                     <td>{b.outcomes.analyzed_count > 0 ? (b.outcomes.by_disposition_status["Escalation"]?.count ?? 0) : "—"}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.scheduled_at ? b.scheduled_at.slice(0, 16) : "—"}</td>
                     <td>

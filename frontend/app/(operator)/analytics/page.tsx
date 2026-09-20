@@ -28,6 +28,13 @@ function dispositionPct(outcomes: OutcomeBreakdown, status: string) {
   if (outcomes.analyzed_count === 0) return "—";
   return pct(outcomes.by_disposition_status[status]?.pct_of_analyzed ?? 0);
 }
+/** "Converted" is the doc's Booking + Visited outcomes combined. */
+function convertedPct(outcomes: OutcomeBreakdown) {
+  if (outcomes.analyzed_count === 0) return "—";
+  const booking = outcomes.by_disposition_status["Booking"]?.pct_of_analyzed ?? 0;
+  const visited = outcomes.by_disposition_status["Visited"]?.pct_of_analyzed ?? 0;
+  return pct(booking + visited);
+}
 function dur(s: number | null) { if (s == null) return "—"; const m = Math.floor(s / 60); return m ? `${m}m ${(s % 60).toFixed(0)}s` : `${s.toFixed(1)}s`; }
 function cost(v: number | null) { if (v == null) return "—"; return `$${v.toFixed(4)}`; }
 
@@ -273,7 +280,7 @@ function AgentTable({ rows }: { rows: AgentStats[] }) {
                 <td style={{ color: "var(--red)" }}>{r.call_volume.not_connected}</td>
                 <td className="muted">{pct(ncRate)}</td>
                 <td className="muted">{dur(r.duration.avg_seconds)}</td>
-                <td>{dispositionPct(r.outcomes, "Converted")}</td>
+                <td>{convertedPct(r.outcomes)}</td>
                 <td>{dispositionPct(r.outcomes, "Escalation")}</td>
                 <td>{dispositionPct(r.outcomes, "Follow Up")}</td>
                 <td className="muted">{cost(r.cost.total)}</td>
@@ -324,7 +331,7 @@ function BatchTable({ rows }: { rows: BatchStats[] }) {
                 <td style={{ color: "var(--red)" }}>{r.call_volume.not_connected}</td>
                 <td className="muted">{pct(ncRate)}</td>
                 <td className="muted">{dur(r.duration.avg_seconds)}</td>
-                <td>{dispositionPct(r.outcomes, "Converted")}</td>
+                <td>{convertedPct(r.outcomes)}</td>
                 <td>{dispositionPct(r.outcomes, "Escalation")}</td>
                 <td>{dispositionPct(r.outcomes, "Follow Up")}</td>
                 <td className="muted">{cost(r.cost.total)}</td>

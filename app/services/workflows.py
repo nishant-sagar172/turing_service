@@ -31,6 +31,7 @@ COMMON_OUTCOMES = frozenset(
         "wants_discount",
         "wants_second_opinion",
         "waiting_doctor_confirmation",
+        "waiting_referral_letter",
         "follow_up",
         "call_dropped",
         "declined",
@@ -49,7 +50,6 @@ _IPD_EXTRA_OUTCOMES = frozenset(
         "on_medications",
         "waiting_reports",
         "medical_clearance_pending",
-        "waiting_referral_letter",
     }
 )
 
@@ -69,10 +69,7 @@ _IPD_PROMPT_SECTION = """
 "report test karke aana hai"
 
 - medical_clearance_pending: Needs fitness/clearance from another specialist.
-  Signals: "cardiac clearance chahiye", "anaesthesia clearance pending"
-
-- waiting_referral_letter: Referral document from insurer still required.
-  Signals: "referral letter nahi aaya", "insurer se letter chahiye\""""
+  Signals: "cardiac clearance chahiye", "anaesthesia clearance pending\""""
 
 
 @dataclass(frozen=True)

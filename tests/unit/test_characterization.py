@@ -178,8 +178,8 @@ def test_analysis_result_maps_none_requests_and_symptoms_to_empty_lists() -> Non
     # disposition pair derived from it in Python.
     fake_analysis = types.SimpleNamespace(
         call_outcome="scheduled_booking",
-        disposition_status="Converted",
-        sub_status="Booking Scheduled",
+        disposition_status="Booking",
+        sub_status=None,
         workflow_code="opd",
         summary="Patient confirmed appointment.",
         reason="Explicit confirmation of slot.",
@@ -195,8 +195,8 @@ def test_analysis_result_maps_none_requests_and_symptoms_to_empty_lists() -> Non
 
     assert result is not None
     assert result.call_outcome == "scheduled_booking"
-    assert result.disposition_status == "Converted"
-    assert result.sub_status == "Booking Scheduled"
+    assert result.disposition_status == "Booking"
+    assert result.sub_status is None
     assert result.workflow_code == "opd"
     assert result.summary == "Patient confirmed appointment."
     assert result.reason == "Explicit confirmation of slot."
