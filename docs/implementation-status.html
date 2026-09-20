@@ -1,0 +1,508 @@
+<title>Turing Implementation Status</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --ground:      #f2f4f6;
+    --surface:     #ffffff;
+    --surface-sub: #f7f9fa;
+    --ink:         #14181e;
+    --ink-soft:    #5a6472;
+    --ink-faint:   #8b94a1;
+    --line:        #dde2e8;
+    --line-soft:   #eceff3;
+    --signal:      #0b5c4e;
+    --signal-wash: #e3f0ec;
+
+    --st-proven:   #1a7f5a;
+    --st-untested: #a96700;
+    --st-gap:      #b3261e;
+    --st-dormant:  #6b7280;
+    --st-proven-wash:   #e4f2eb;
+    --st-untested-wash: #fbf0dd;
+    --st-gap-wash:      #f9e6e4;
+    --st-dormant-wash:  #eef0f3;
+
+    --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --radius: 6px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0d1014;
+      --surface:     #161b21;
+      --surface-sub: #1b2128;
+      --ink:         #e3e7ec;
+      --ink-soft:    #9aa4b1;
+      --ink-faint:   #6d7784;
+      --line:        #29313a;
+      --line-soft:   #212831;
+      --signal:      #46b399;
+      --signal-wash: #12302a;
+
+      --st-proven:   #4cc08d;
+      --st-untested: #dfa33c;
+      --st-gap:      #ef7f76;
+      --st-dormant:  #939dab;
+      --st-proven-wash:   #133025;
+      --st-untested-wash: #332713;
+      --st-gap-wash:      #34191a;
+      --st-dormant-wash:  #232a33;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #0d1014;
+    --surface:     #161b21;
+    --surface-sub: #1b2128;
+    --ink:         #e3e7ec;
+    --ink-soft:    #9aa4b1;
+    --ink-faint:   #6d7784;
+    --line:        #29313a;
+    --line-soft:   #212831;
+    --signal:      #46b399;
+    --signal-wash: #12302a;
+
+    --st-proven:   #4cc08d;
+    --st-untested: #dfa33c;
+    --st-gap:      #ef7f76;
+    --st-dormant:  #939dab;
+    --st-proven-wash:   #133025;
+    --st-untested-wash: #332713;
+    --st-gap-wash:      #34191a;
+    --st-dormant-wash:  #232a33;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 940px;
+    margin: 0 auto;
+    padding-block: 40px 72px;
+    padding-left: 20px;
+    padding-right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 44px;
+  }
+
+  /* ── Masthead ───────────────────────────────────────────────── */
+  .masthead { display: flex; flex-direction: column; gap: 14px; }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--signal);
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(28px, 5vw, 38px);
+    font-weight: 700;
+    letter-spacing: -0.022em;
+    line-height: 1.12;
+    text-wrap: balance;
+  }
+  .standfirst {
+    margin: 0;
+    max-width: 62ch;
+    font-size: 16px;
+    color: var(--ink-soft);
+  }
+  .stamp {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+  }
+  .stamp b { color: var(--ink-soft); font-weight: 500; }
+
+  /* ── Meter strip ────────────────────────────────────────────── */
+  .meters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .meter { background: var(--surface); padding: 14px 16px; }
+  .meter dt {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 4px;
+  }
+  .meter dd {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 21px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  .meter dd.warn { color: var(--st-untested); }
+  .meter dd small { font-size: 12px; font-weight: 400; color: var(--ink-faint); }
+
+  /* ── Sections ───────────────────────────────────────────────── */
+  section { display: flex; flex-direction: column; gap: 16px; }
+  h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--signal);
+  }
+  h2 + p { margin: 0; max-width: 68ch; color: var(--ink-soft); }
+  p { margin: 0; max-width: 68ch; }
+
+  /* ── Status rows ────────────────────────────────────────────── */
+  .rows { display: flex; flex-direction: column; gap: 10px; }
+  .row {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 15px 18px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 16px;
+    align-items: start;
+  }
+  .row h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+  .row .chip { grid-row: 1; grid-column: 2; }
+  .row p { grid-column: 1 / -1; font-size: 14px; color: var(--ink-soft); }
+  .row .evidence {
+    grid-column: 1 / -1;
+    margin: 4px 0 0;
+    padding: 9px 12px;
+    background: var(--surface-sub);
+    border-left: 2px solid var(--signal);
+    border-radius: 0 4px 4px 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    overflow-x: auto;
+  }
+
+  .chip {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 100px;
+    white-space: nowrap;
+  }
+  .chip-proven   { color: var(--st-proven);   background: var(--st-proven-wash); }
+  .chip-untested { color: var(--st-untested); background: var(--st-untested-wash); }
+  .chip-gap      { color: var(--st-gap);      background: var(--st-gap-wash); }
+  .chip-dormant  { color: var(--st-dormant);  background: var(--st-dormant-wash); }
+
+  /* ── Tables ─────────────────────────────────────────────────── */
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  thead th {
+    text-align: left;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding: 10px 14px;
+    background: var(--surface-sub);
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  td { padding: 11px 14px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.sev { width: 1%; white-space: nowrap; }
+  td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+    background: var(--surface-sub);
+    border: 1px solid var(--line-soft);
+    padding: 1px 5px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  td code, .row p code { white-space: normal; }
+
+  /* ── Callout ────────────────────────────────────────────────── */
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--st-untested);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .note.blocking { border-left-color: var(--st-gap); }
+  .note strong { font-weight: 600; }
+  .note p { font-size: 14px; color: var(--ink-soft); max-width: none; }
+  .note ul { margin: 0; padding-left: 20px; font-size: 14px; color: var(--ink-soft); }
+  .note li { margin-bottom: 3px; }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding-top: 18px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 18px;
+  }
+
+  @media (max-width: 560px) {
+    .row { grid-template-columns: 1fr; }
+    .row .chip { grid-row: auto; grid-column: 1; justify-self: start; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Engineering status · turing_service</div>
+    <h1>Turing Implementation Status</h1>
+    <p class="standfirst">Where the disposition-based classification overhaul actually stands: what is proven against real data, what is written but has never run on a live call, and what is still open.</p>
+    <div class="stamp">
+      <span><b>Date</b> 2026-09-16</span>
+      <span><b>Branch</b> feat/disposition-sub-status-and-fixes</span>
+      <span><b>Schema</b> 0011_drop_outcome_mirror</span>
+      <span><b>Guide</b> v2.0.0</span>
+    </div>
+  </header>
+
+  <dl class="meters">
+    <div class="meter"><dt>Endpoints</dt><dd>77</dd></div>
+    <div class="meter"><dt>Tests passing</dt><dd>67</dd></div>
+    <div class="meter"><dt>Migrations</dt><dd>11</dd></div>
+    <div class="meter"><dt>Workflows</dt><dd>4</dd></div>
+    <div class="meter"><dt>Disposition rules</dt><dd>20</dd></div>
+    <div class="meter"><dt>Live dispositions</dt><dd class="warn">0 <small>/ 386</small></dd></div>
+  </dl>
+
+  <section>
+    <h2>Proven against real data</h2>
+    <p>Each of these was exercised today, on this branch, against the live Postgres instance and the OpenAI model configured in <code>.env</code>.</p>
+
+    <div class="rows">
+      <article class="row">
+        <h3>Transcript → outcome → disposition</h3>
+        <span class="chip chip-proven">Verified</span>
+        <p>The classifier was run over the five longest real transcripts in the database — mixed Hindi and English, 3.4k–5.4k characters. Every one landed on a valid <code>opd</code> outcome and resolved to a sensible disposition pair, including the escalation-takes-priority rule firing on a patient reporting active symptoms.</p>
+        <div class="evidence">escalation           → Escalation / —<br>completed_visited    → Converted / Visited<br>wants_cost_estimate  → Follow Up / Cost Estimate Requested<br>declined             → Not Interested / Declined<br>follow_up            → Follow Up / General Follow Up<br><br>5/5 classified into the opd taxonomy</div>
+      </article>
+
+      <article class="row">
+        <h3>Workflow registry is self-extending</h3>
+        <span class="chip chip-proven">Verified</span>
+        <p>Adding a fifth workflow as a single registry entry propagated to the schema enum, the system prompt, the priority chain and the disposition wildcards with no other edit. Prompt and schema agree per workflow, and IPD-only outcomes do not leak into the other three prompts.</p>
+        <div class="evidence">opd 12 · ipd 18 · cancer_workflow 12 · gynae_workflow 12 outcomes<br>pattern: ^(cancer_workflow|gynae_workflow|ipd|opd)$</div>
+      </article>
+
+      <article class="row">
+        <h3>Schema migration and rollback</h3>
+        <span class="chip chip-proven">Verified</span>
+        <p><code>0011</code> drops the <code>outcome</code> mirror column. Applied, downgraded, and re-applied against the live database with all 386 analysis rows intact. ORM columns and live table columns were then compared field by field and match exactly.</p>
+        <div class="evidence">upgrade → downgrade → upgrade  ·  386 rows preserved<br>information_schema columns == CallAnalysis.__table__ columns</div>
+      </article>
+
+      <article class="row">
+        <h3>Contract and documentation agree with the code</h3>
+        <span class="chip chip-proven">Verified</span>
+        <p>Every field of <code>CallAnalysisResult</code>, <code>OutcomeBreakdown</code> and <code>TimeseriesPoint</code> is documented in the integration guide, every JSON sample in the guide parses and matches its Pydantic model exactly, and every live outcome has a frontend label whose colour matches its disposition family.</p>
+        <div class="evidence">12/12 JSON samples parsed and schema-matched<br>19/19 live outcomes labelled and colour-matched</div>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>Built but never run on a live call</h2>
+    <p>This is the honest gap. The pipeline works when driven directly; it has not yet been driven by a real inbound webhook.</p>
+
+    <div class="rows">
+      <article class="row">
+        <h3>Webhook → background analysis → stored disposition</h3>
+        <span class="chip chip-untested">Unexercised</span>
+        <p>No call has reached a terminal status since the overhaul landed, so <code>run_analysis_for_call</code> has never written a disposition. The last genuine LLM analysis ran on <strong>2026-08-18</strong> under the old taxonomy; migration <code>0011</code> deliberately left those 386 rows unclassified rather than inventing granular outcomes for coarse buckets.</p>
+        <div class="evidence">call_analysis: 386 total · 0 with call_outcome · 0 with disposition_status<br>model_used: status-classifier/v1 (255) · openai/gpt-5.6-luna (131)</div>
+      </article>
+
+      <article class="row">
+        <h3>The one scheduled call</h3>
+        <span class="chip chip-untested">Pending</span>
+        <p>Call <code>9c03a0db</code> has sat in <code>scheduled</code> since 2026-09-15 20:32 UTC with no transcript and no webhook. Until it or another call completes, the end-to-end chain stays unverified in production conditions.</p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>Fixed while auditing</h2>
+    <p>Four defects found and corrected in this pass, none of them part of the original request.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Defect</th><th>Effect</th><th>Fix</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>status_code=204</code> routes under <code>from __future__ import annotations</code></td>
+            <td><code>import app.main</code> failed outright on FastAPI 0.115.14 — the annotation resolves to <code>NoneType</code>, which FastAPI treats as a response body. Test collection aborted before any test ran.</td>
+            <td><code>response_model=None</code> on all seven routes</td>
+          </tr>
+          <tr>
+            <td>Batch status stored verbatim from the voice engine</td>
+            <td>Bolna reports <code>"scheduled at 2026-09-15T14:16:00+00:00"</code> as a status. Stored as-is it never equals <code>"scheduled"</code>, so 13 batches are invisible to any status filter.</td>
+            <td><code>normalize_batch_status()</code> on both write paths, with tests</td>
+          </tr>
+          <tr>
+            <td><code>LEGACY_BUCKET_KEYS</code> in the operator console</td>
+            <td>Misfiled the four granular outcomes that share a name with an old bucket — <code>follow_up</code>, <code>escalation</code>, <code>not_interested</code>, <code>no_output</code> — as pre-rollout data.</td>
+            <td>Removed along with the split it fed</td>
+          </tr>
+          <tr>
+            <td>Guide listed three workflows, not four</td>
+            <td>Two field tables omitted <code>gynae_workflow</code>, and one still called the field a "task type" — the exact word the rename existed to remove.</td>
+            <td>Corrected; a check now fails if any enumeration is incomplete</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Open</h2>
+    <p>Ranked by what would bite first in production.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Severity</th><th>Issue</th><th>What it needs</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="sev"><span class="chip chip-gap">Blocking</span></td>
+            <td><strong>Client outcome webhook always sends <code>disposition: null</code>.</strong> <code>build_lean_outcome</code> runs in the request path; analysis is queued as a background task afterwards, so the classification does not exist yet when the payload is built. The field has been a placeholder since it was added.</td>
+            <td>A design decision: fire a second notification after analysis, or move forwarding into the analysis task. Changes how many webhooks a client receives.</td>
+          </tr>
+          <tr>
+            <td class="sev"><span class="chip chip-gap">High</span></td>
+            <td><strong>13 batch rows still hold the unnormalised status string.</strong> The code is fixed going forward; existing rows are not.</td>
+            <td>One <code>UPDATE</code>, pending approval</td>
+          </tr>
+          <tr>
+            <td class="sev"><span class="chip chip-untested">Medium</span></td>
+            <td><strong><code>requirements.txt</code> pins nothing.</strong> <code>fastapi&gt;=0.115.0</code> resolved to 0.115.14 locally, which is what surfaced the 204 break. CLAUDE.md requires exact pins.</td>
+            <td>Pin the resolved versions</td>
+          </tr>
+          <tr>
+            <td class="sev"><span class="chip chip-untested">Medium</span></td>
+            <td><strong>Phone validation is asymmetric.</strong> Single calls validate E.164 and reject with 422 before dialling; batch recipients only get a non-empty check, so a bad number fails at the voice engine instead.</td>
+            <td>Apply the same validator to batch recipients</td>
+          </tr>
+          <tr>
+            <td class="sev"><span class="chip chip-dormant">Low</span></td>
+            <td><strong><code>cancer_workflow</code> and <code>gynae_workflow</code> carry only the common twelve outcomes.</strong> They are registered and route correctly, but have no speciality outcomes or prompt sections — so they classify identically to <code>opd</code> today.</td>
+            <td>Clinical input on what each workflow needs</td>
+          </tr>
+          <tr>
+            <td class="sev"><span class="chip chip-dormant">Low</span></td>
+            <td><strong>Per-client LLM keys are dormant.</strong> <code>ENCRYPTION_KEY</code> is unset, so <code>analysis_llm_api_key</code> returns 503 and every client shares the service key.</td>
+            <td>Key generation and storage strategy</td>
+          </tr>
+          <tr>
+            <td class="sev"><span class="chip chip-dormant">Low</span></td>
+            <td><strong><code>BATCH_TERMINAL_STATUSES</code> exists twice</strong> — in <code>app/routers/webhooks.py</code> and <code>app/core/call_status.py</code>, with a comment acknowledging the duplication.</td>
+            <td>Collapse to one, once the characterization test is repointed</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Environment snapshot</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Setting</th><th>Value</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td>LLM provider</td><td class="num">openai</td><td>Anthropic path implemented and schema-enforced, but no key set</td></tr>
+          <tr><td>LLM model</td><td class="num">gpt-5.6-luna</td><td>Confirmed working — produced 131 analyses on 2026-08-18</td></tr>
+          <tr><td><code>ENCRYPTION_KEY</code></td><td class="num">unset</td><td>Per-client key feature dormant</td></tr>
+          <tr><td>Clients</td><td class="num">3</td><td>kalaam-continental active; two suspended</td></tr>
+          <tr><td>Calls</td><td class="num">387</td><td>165 stopped · 131 completed · 44 busy · 40 no-answer · 6 failed · 1 scheduled</td></tr>
+          <tr><td>Analyses</td><td class="num">386</td><td>All pre-rollout; none classified under the current taxonomy</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Before this ships</h2>
+
+    <div class="note blocking">
+      <strong>Nothing in this report is committed.</strong>
+      <p>45 files are uncommitted on <code>feat/disposition-sub-status-and-fixes</code> — 34 modified and 11 untracked, including all three migrations and six new modules. A branch switch already stranded this work once. Two of the untracked files (<code>docs/DATABASE_ACCESS.md</code>, <code>docs/deployment-guide.html</code>) predate this work and should not be swept in.</p>
+      <p>Suggested split, so the migration and the rename stay separately revertable:</p>
+      <ul>
+        <li>Workflow registry, disposition mapping, migrations <code>0009</code>–<code>0011</code></li>
+        <li>Classification overhaul — prompt, schema-enforced providers, client caching</li>
+        <li>Admin call endpoint and the <code>place_call</code> service extraction</li>
+        <li>Analytics disposition breakdown</li>
+        <li>Frontend — types, shared outcomes module, workflow dropdowns, operator fixes</li>
+        <li>Docs and tests</li>
+      </ul>
+    </div>
+
+    <div class="note">
+      <strong>The first real call is the remaining verification.</strong>
+      <p>Everything downstream of a terminal-status webhook has been proven by driving it directly. What has not been proven is the webhook itself triggering it. One completed call closes that gap and turns the <span style="color:var(--st-untested)">0 / 386</span> above into a real number.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>turing_service</span>
+    <span>Docstribe · internal</span>
+    <span>Generated 2026-09-16</span>
+  </footer>
+
+</div>

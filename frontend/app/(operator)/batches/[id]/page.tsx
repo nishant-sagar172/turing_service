@@ -16,17 +16,13 @@ import type {
   ClientBatchSummary,
 } from "@/lib/types";
 
-const OUTCOME_KEYS = ["booking", "follow_up", "escalation", "not_interested", "no_output", "other", "not_reached"] as const;
-const OUTCOME_LABELS: Record<string, string> = {
-  booking: "Booking", follow_up: "Follow-up", escalation: "Escalation",
-  not_interested: "Not interested", no_output: "No output", other: "Other",
-  not_reached: "Not reached",
-};
-const OUTCOME_COLORS: Record<string, string> = {
-  booking: "var(--green)", follow_up: "var(--accent)", escalation: "var(--amber)",
-  not_interested: "var(--red)", no_output: "var(--muted)", other: "var(--muted)",
-  not_reached: "var(--muted)",
-};
+import {
+  DISPOSITION_ORDER,
+  dispositionColor,
+  orderedDispositions,
+  outcomeColor,
+  outcomeLabel,
+} from "@/lib/outcomes";
 
 const URGENCY_LEVELS = ["low", "medium", "high"] as const;
 const URGENCY_COLORS: Record<string, string> = {
@@ -48,7 +44,7 @@ function statusClass(s: string) {
 
 function OutcomeBadge({ outcome }: { outcome: string | null }) {
   if (!outcome) return <span className="muted">—</span>;
-  const color = OUTCOME_COLORS[outcome] ?? "var(--muted)";
+  const color = outcomeColor(outcome);
   return (
     <span style={{
       display: "inline-block", padding: "2px 8px", borderRadius: 12, fontSize: 11,
@@ -56,7 +52,7 @@ function OutcomeBadge({ outcome }: { outcome: string | null }) {
       border: `1px solid color-mix(in srgb, ${color} 35%, transparent)`,
       color,
     }}>
-      {OUTCOME_LABELS[outcome] ?? outcome}
+      {outcomeLabel(outcome)}
     </span>
   );
 }
@@ -102,7 +98,7 @@ function BatchDetailInner() {
   const [actionErr, setActionErr] = useState<string | null>(null);
 
   // Call-list filters (this page only)
-  const [outcomeFilter, setOutcomeFilter] = useState("");
+  const [dispositionFilter, setDispositionFilter] = useState("");
   const [urgencyFilter, setUrgencyFilter] = useState("");
   const [contactQuery, setContactQuery] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
@@ -111,14 +107,14 @@ function BatchDetailInner() {
   const fetchCallsList = useCallback((iid: string, page: number): Promise<CallListResponse | null> => {
     const params = {
       batch_id: iid, page, page_size: PAGE_SIZE,
-      outcome: outcomeFilter || undefined,
+      disposition_status: dispositionFilter || undefined,
       urgency: urgencyFilter || undefined,
       q: appliedQuery || undefined,
     };
     return isAdmin && adminClientId
       ? adminApi.listClientCalls(adminClientId, params).catch(() => null)
       : (api.listCalls(params).catch(() => null) as Promise<CallListResponse | null>);
-  }, [isAdmin, adminClientId, outcomeFilter, urgencyFilter, appliedQuery]);
+  }, [isAdmin, adminClientId, dispositionFilter, urgencyFilter, appliedQuery]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -190,7 +186,7 @@ function BatchDetailInner() {
   useEffect(() => {
     if (internalId) loadCallsPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outcomeFilter, urgencyFilter, appliedQuery]);
+  }, [dispositionFilter, urgencyFilter, appliedQuery]);
 
   function applyContactSearch() {
     setAppliedQuery(contactQuery.trim());
@@ -367,20 +363,27 @@ function BatchDetailInner() {
                   <p className="muted" style={{ fontSize: 12, marginBottom: 16 }}>
                     {overview.outcomes.analyzed_count} analyzed · coverage {pct(overview.outcomes.coverage_pct)} of connected
                   </p>
-                  {OUTCOME_KEYS.map((key) => {
-                    const entry = overview.outcomes[key];
-                    const color = OUTCOME_COLORS[key];
-                    return (
-                      <div key={key} className="outcome-bar-row">
-                        <span style={{ width: 110, fontSize: 12, color: "var(--text)", flexShrink: 0 }}>{OUTCOME_LABELS[key]}</span>
-                        <div className="outcome-bar-track">
-                          <div className="outcome-bar-fill" style={{ width: pct(entry.pct_of_analyzed), background: color }} />
+                  {Object.keys(overview.outcomes.by_disposition_status).length === 0 && (
+                    <p className="muted" style={{ fontSize: 12 }}>
+                      No dispositions recorded — these calls were analysed before
+                      the disposition rollout.
+                    </p>
+                  )}
+                  {orderedDispositions(overview.outcomes.by_disposition_status).map(
+                    ([status, entry]) => {
+                      const color = dispositionColor(status);
+                      return (
+                        <div key={status} className="outcome-bar-row">
+                          <span style={{ width: 110, fontSize: 12, color: "var(--text)", flexShrink: 0 }}>{status}</span>
+                          <div className="outcome-bar-track">
+                            <div className="outcome-bar-fill" style={{ width: pct(entry.pct_of_analyzed), background: color }} />
+                          </div>
+                          <span style={{ width: 50, fontSize: 12, color, textAlign: "right", flexShrink: 0 }}>{pct(entry.pct_of_analyzed)}</span>
+                          <span className="muted" style={{ width: 40, fontSize: 12, textAlign: "right", flexShrink: 0 }}>{entry.count}</span>
                         </div>
-                        <span style={{ width: 50, fontSize: 12, color, textAlign: "right", flexShrink: 0 }}>{pct(entry.pct_of_analyzed)}</span>
-                        <span className="muted" style={{ width: 40, fontSize: 12, textAlign: "right", flexShrink: 0 }}>{entry.count}</span>
-                      </div>
-                    );
-                  })}
+                      );
+                    },
+                  )}
                 </div>
               )}
             </>
@@ -401,10 +404,10 @@ function BatchDetailInner() {
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end", marginBottom: 16 }}>
               <div>
-                <label>Outcome</label>
-                <select value={outcomeFilter} onChange={(e) => setOutcomeFilter(e.target.value)}>
-                  <option value="">All outcomes</option>
-                  {OUTCOME_KEYS.map((k) => <option key={k} value={k}>{OUTCOME_LABELS[k]}</option>)}
+                <label>Disposition</label>
+                <select value={dispositionFilter} onChange={(e) => setDispositionFilter(e.target.value)}>
+                  <option value="">All dispositions</option>
+                  {DISPOSITION_ORDER.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <div>
@@ -455,7 +458,7 @@ function BatchDetailInner() {
                         <td><span className={`badge ${statusClass(c.status)}`}>{c.status}</span></td>
                         <td className="muted">{dur(c.duration)}</td>
                         <td className="muted">{costFmt(c.cost)}</td>
-                        <td><OutcomeBadge outcome={c.analysis?.outcome ?? null} /></td>
+                        <td><OutcomeBadge outcome={c.analysis?.call_outcome ?? null} /></td>
                         <td><UrgencyBadge urgency={c.analysis?.urgency ?? null} /></td>
                         <td style={{ maxWidth: 220, fontSize: 12, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.analysis?.summary ?? undefined}>
                           {c.analysis?.summary ?? <span className="muted">—</span>}

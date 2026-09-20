@@ -109,7 +109,9 @@ def test_build_query_blocks_write_intent_before_later_stages(monkeypatch: Any) -
     assert calls == ["_PromptEnhanceResult"]
 
 
-def test_build_query_returns_clarify_needed_for_ambiguous_question(monkeypatch: Any) -> None:
+def test_build_query_returns_clarify_needed_for_ambiguous_question(
+    monkeypatch: Any,
+) -> None:
     calls = _patch_structured(
         monkeypatch,
         [

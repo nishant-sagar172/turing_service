@@ -35,9 +35,21 @@ export async function rawReq<T>(
 
   if (!res.ok) {
     const d = data as { message?: string; detail?: unknown } | null;
-    const msg =
+    const base =
       (d && (d.message || (typeof d.detail === "string" ? d.detail : null))) ||
       `Request failed (${res.status})`;
+    // Upstream errors put the useful part in `detail` as an object (e.g. the
+    // voice engine's rejection reason). Without this it is dropped and the
+    // caller only sees a generic "returned 400", which is undiagnosable.
+    let msg = base;
+    if (d && d.detail && typeof d.detail !== "string") {
+      try {
+        const extra = JSON.stringify(d.detail);
+        if (extra && extra !== "{}" && extra !== "null") msg = `${base} — ${extra}`;
+      } catch {
+        /* detail is not serialisable; the base message still stands */
+      }
+    }
     throw new ApiError(msg, res.status, data);
   }
   return data as T;

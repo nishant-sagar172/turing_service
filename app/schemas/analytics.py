@@ -32,15 +32,17 @@ class OutcomeCount(BaseModel):
 
 
 class OutcomeBreakdown(BaseModel):
+    """Two resolutions of the same analysed calls — never sum them together.
+
+    Both maps are keyed by the values actually stored, so registering a new
+    workflow outcome needs no schema change. `by_disposition_status` is the
+    business rollup of `by_call_outcome`; a key is absent when its count is zero.
+    """
+
     analyzed_count: int
     coverage_pct: float
-    booking: OutcomeCount
-    escalation: OutcomeCount
-    not_interested: OutcomeCount
-    no_output: OutcomeCount
-    follow_up: OutcomeCount
-    other: OutcomeCount
-    not_reached: OutcomeCount
+    by_call_outcome: dict[str, OutcomeCount]
+    by_disposition_status: dict[str, OutcomeCount]
 
 
 class RetryStats(BaseModel):
@@ -87,4 +89,5 @@ class TimeseriesPoint(BaseModel):
     total: int
     connected: int
     not_connected: int
-    outcomes: dict[str, int]
+    by_call_outcome: dict[str, int]
+    by_disposition_status: dict[str, int]

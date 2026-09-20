@@ -91,14 +91,14 @@ def _outcome_breakdown(
     analyzed = sum(outcome_counts.values())
     coverage = round(analyzed / terminal, 4) if terminal else 0.0
 
+    def _one(count: int) -> OutcomeCount:
+        return OutcomeCount(
+            count=count,
+            pct_of_analyzed=round(count / analyzed, 4) if analyzed else 0.0,
+        )
+
     def _as_outcome_counts(counts: dict[str, int]) -> dict[str, OutcomeCount]:
-        return {
-            label: OutcomeCount(
-                count=count,
-                pct_of_analyzed=round(count / analyzed, 4) if analyzed else 0.0,
-            )
-            for label, count in sorted(counts.items())
-        }
+        return {label: _one(count) for label, count in sorted(counts.items())}
 
     return OutcomeBreakdown(
         analyzed_count=analyzed,
@@ -167,13 +167,19 @@ async def _fetch_volume_duration_cost(
 async def _fetch_outcome_counts(
     session: AsyncSession, filters: list[Any]
 ) -> dict[str, int]:
+    """Rows analysed before the disposition rollout carry no call_outcome — they
+    are excluded, so `analyzed_count` counts only rows in the live taxonomy."""
     rows = await session.execute(
-        select(CallAnalysis.outcome, func.count().label("cnt"))
+        select(CallAnalysis.call_outcome, func.count().label("cnt"))
         .join(Call, Call.id == CallAnalysis.call_id)
-        .where(*filters, Call.status.in_(TERMINAL))
-        .group_by(CallAnalysis.outcome)
+        .where(
+            *filters,
+            Call.status.in_(TERMINAL),
+            CallAnalysis.call_outcome.isnot(None),
+        )
+        .group_by(CallAnalysis.call_outcome)
     )
-    return {row.outcome: row.cnt for row in rows}
+    return {row.call_outcome: row.cnt for row in rows}
 
 
 async def _fetch_disposition_counts(
@@ -324,15 +330,19 @@ async def get_by_agent(
 
     outcome_rows = (
         await session.execute(
-            select(Call.agent_id, CallAnalysis.outcome, func.count().label("cnt"))
+            select(Call.agent_id, CallAnalysis.call_outcome, func.count().label("cnt"))
             .join(CallAnalysis, Call.id == CallAnalysis.call_id)
-            .where(*base, Call.status.in_(TERMINAL))
-            .group_by(Call.agent_id, CallAnalysis.outcome)
+            .where(
+                *base,
+                Call.status.in_(TERMINAL),
+                CallAnalysis.call_outcome.isnot(None),
+            )
+            .group_by(Call.agent_id, CallAnalysis.call_outcome)
         )
     ).all()
     outcomes_by_agent: dict[str, dict[str, int]] = {}
     for r in outcome_rows:
-        outcomes_by_agent.setdefault(r.agent_id, {})[r.outcome] = r.cnt
+        outcomes_by_agent.setdefault(r.agent_id, {})[r.call_outcome] = r.cnt
 
     disposition_rows = (
         await session.execute(
@@ -464,19 +474,20 @@ async def get_by_batch(
 
     outcome_rows = (
         await session.execute(
-            select(Call.batch_id, CallAnalysis.outcome, func.count().label("cnt"))
+            select(Call.batch_id, CallAnalysis.call_outcome, func.count().label("cnt"))
             .join(CallAnalysis, Call.id == CallAnalysis.call_id)
             .where(
                 *base_with_batch,
                 Call.status.in_(TERMINAL),
                 Call.batch_id.in_(batch_pks),
+                CallAnalysis.call_outcome.isnot(None),
             )
-            .group_by(Call.batch_id, CallAnalysis.outcome)
+            .group_by(Call.batch_id, CallAnalysis.call_outcome)
         )
     ).all()
     outcomes_by_batch: dict[uuid.UUID, dict[str, int]] = {}
     for r in outcome_rows:
-        outcomes_by_batch.setdefault(r.batch_id, {})[r.outcome] = r.cnt
+        outcomes_by_batch.setdefault(r.batch_id, {})[r.call_outcome] = r.cnt
 
     disposition_rows = (
         await session.execute(
@@ -573,23 +584,38 @@ async def get_timeseries(
             total=int(row.total),
             connected=int(row.connected or 0),
             not_connected=int(row.not_connected or 0),
-            outcomes={},
+            by_call_outcome={},
+            by_disposition_status={},
         )
 
+    # Both resolutions come from one pass: disposition_status is stored alongside
+    # call_outcome, so grouping by the pair avoids a second round trip.
     outcome_rows = await session.execute(
         select(
             func.date_trunc(trunc, Call.created_at).label("bucket"),
-            CallAnalysis.outcome,
+            CallAnalysis.call_outcome,
+            CallAnalysis.disposition_status,
             func.count().label("cnt"),
         )
         .join(Call, Call.id == CallAnalysis.call_id)
-        .where(*filters)
-        .group_by(text("bucket"), CallAnalysis.outcome)
+        .where(*filters, CallAnalysis.call_outcome.isnot(None))
+        .group_by(
+            text("bucket"), CallAnalysis.call_outcome, CallAnalysis.disposition_status
+        )
         .order_by(text("bucket"))
     )
     for row in outcome_rows:
         date_str = row.bucket.date().isoformat()
-        if date_str in points_by_date:
-            points_by_date[date_str].outcomes[row.outcome] = int(row.cnt)
+        point = points_by_date.get(date_str)
+        if point is None:
+            continue
+        count = int(row.cnt)
+        point.by_call_outcome[row.call_outcome] = (
+            point.by_call_outcome.get(row.call_outcome, 0) + count
+        )
+        if row.disposition_status is not None:
+            point.by_disposition_status[row.disposition_status] = (
+                point.by_disposition_status.get(row.disposition_status, 0) + count
+            )
 
     return list(points_by_date.values())

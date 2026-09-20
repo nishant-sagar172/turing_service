@@ -20,6 +20,8 @@ import type {
   CallAnalysisResult,
   DriftEvent,
   KeySummary,
+  MakeCallRequest,
+  MakeCallResponse,
   PhoneNumberCatalogEntry,
   PhoneNumberSyncResult,
   SyncResult,
@@ -157,7 +159,7 @@ export const adminApi = {
   // these hit the admin analytics detail endpoint)
   listClientCalls: (
     clientId: string,
-    params: { page?: number; page_size?: number; status?: string; outcome?: string; urgency?: string; q?: string; agent_id?: string; batch_id?: string; date_from?: string; date_to?: string } = {}
+    params: { page?: number; page_size?: number; status?: string; outcome?: string; call_outcome?: string; disposition_status?: string; urgency?: string; q?: string; agent_id?: string; batch_id?: string; date_from?: string; date_to?: string } = {}
   ) => req<CallListResponse>(`/clients/${clientId}/calls${qs(params)}`),
 
   getClientCallDetail: (clientId: string, callId: string) =>
@@ -165,4 +167,10 @@ export const adminApi = {
 
   analyzeClientCall: (clientId: string, callId: string) =>
     req<CallAnalysisResult>(`/clients/${clientId}/calls/${callId}/analyze`, { method: "POST" }),
+
+  makeClientCall: (clientId: string, body: MakeCallRequest) =>
+    req<MakeCallResponse>(`/clients/${clientId}/calls`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };

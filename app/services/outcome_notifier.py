@@ -1,4 +1,4 @@
-"""Forwards lean call outcomes to a client's own callback endpoint.
+"""Forwards full call outcomes to a client's own callback endpoint.
 
 Payload is signed with HMAC-SHA256 over the raw JSON body:
 ``X-Webhook-Signature: sha256=<hexdigest>``.
@@ -19,26 +19,62 @@ from typing import Any
 
 import httpx
 
-from app.db.models import Call
+from app.db.models import Call, CallAnalysis
 
 logger = logging.getLogger("turing.notifier")
 
 
-def build_lean_outcome(call: Call, voice_batch_id: str | None) -> dict[str, Any]:
-    """The lean outcome contract a client stores (full record stays in turing)."""
+def build_outcome(
+    call: Call, voice_batch_id: str | None, analysis: CallAnalysis | None = None
+) -> dict[str, Any]:
+    """The full call outcome forwarded to a client's webhook.
+
+    Carries the complete record: call metadata, transcript, extracted data, and
+    the entire analysis block (outcome + disposition + every classified field),
+    so a client can act on the webhook alone without calling back. ``analysis``
+    is None only when classification could not run (e.g. no LLM key configured).
+    """
+    from_number = call.from_number or (call.batch.from_number if call.batch else None)
+
+    analysis_block = (
+        {
+            "call_outcome": analysis.call_outcome,
+            "disposition_status": analysis.disposition_status,
+            "sub_status": analysis.sub_status,
+            "workflow_code": analysis.workflow_code,
+            "summary": analysis.summary,
+            "reason": analysis.reason,
+            "requests": analysis.requests or [],
+            "urgency": analysis.urgency,
+            "confidence": analysis.confidence,
+            "symptoms_reported": analysis.symptoms_reported or [],
+            "model_used": analysis.model_used,
+            "analyzed_at": (
+                analysis.analyzed_at.isoformat() if analysis.analyzed_at else None
+            ),
+        }
+        if analysis
+        else None
+    )
     return {
         "turing_call_id": str(call.id),
         "turing_batch_id": voice_batch_id,
         "voice_call_id": call.voice_call_id,
         "patient_uhid": call.patient_ref,
+        "client_ref": call.client_ref,
         "contact_number": call.contact_number,
+        "from_number": from_number,
         "agent_id": call.agent_id,
         "status": call.status,
-        "disposition": None,  # reserved for the later analytics phase
         "recording_url": call.recording_url,
         "cost": call.cost,
         "duration": call.duration,
         "hangup_reason": call.hangup_reason,
+        "retry_count": call.retry_count,
+        "created_at": call.created_at.isoformat() if call.created_at else None,
+        "transcript": call.transcript,
+        "extracted_data": call.extracted_data,
+        "analysis": analysis_block,
     }
 
 

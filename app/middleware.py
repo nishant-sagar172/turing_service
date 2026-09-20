@@ -97,6 +97,9 @@ _OPEN_PATHS = frozenset(
         "/v1/register",
         "/webhooks/voice",
         "/v1/portal/lookup",
+        # Static label list, no tenant data — the operator console reads it to
+        # build its workflow dropdown without holding a tenant API key.
+        "/v1/workflows",
     }
 )
 # Prefix-matched open paths (startswith check — covers dynamic segments).

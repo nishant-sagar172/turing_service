@@ -17,7 +17,9 @@ import type {
   DriftEvent,
   AgentVariables,
   ApproveResult,
+  WorkflowOption,
 } from "../../../../lib/types";
+import { api } from "../../../../lib/api";
 
 type Tab = "overview" | "keys" | "config" | "agents" | "phone-numbers" | "drift";
 
@@ -177,6 +179,16 @@ function KeysTab({ clientId }: { clientId: string }) {
 function ConfigTab({ clientId }: { clientId: string }) {
   const [config, setConfig] = useState<ClientConfig | null>(null);
   const [draft, setDraft] = useState<Partial<ClientConfig>>({});
+  const [workflows, setWorkflows] = useState<WorkflowOption[]>([]);
+  const [workflowsError, setWorkflowsError] = useState<string | null>(null);
+  useEffect(() => {
+    api
+      .workflows()
+      .then(setWorkflows)
+      .catch((e) =>
+        setWorkflowsError(e instanceof Error ? e.message : String(e)),
+      );
+  }, []);
   const [settingsValid, setSettingsValid] = useState(true);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [clearApiKey, setClearApiKey] = useState(false);
@@ -266,6 +278,27 @@ function ConfigTab({ clientId }: { clientId: string }) {
               onChange={(e) => setDraft({ ...draft, analysis_llm_model: e.target.value || null })}
             />
           </div>
+        </div>
+        <div>
+          <label>Default workflow</label>
+          <select
+            value={draft.default_workflow_code ?? ""}
+            onChange={(e) => setDraft({ ...draft, default_workflow_code: e.target.value || null })}
+          >
+            <option value="">Not set</option>
+            {workflows.map((t) => (
+              <option key={t.workflow_code} value={t.workflow_code}>{t.label}</option>
+            ))}
+          </select>
+          {workflowsError && (
+            <p style={{ fontSize: 11, color: "var(--red)", margin: "4px 0 0" }}>
+              Could not load workflows — {workflowsError}
+            </p>
+          )}
+          <p className="hint">
+            Used by batches that do not set their own type, and by single calls —
+            which have no batch, so this is their only source. Optional.
+          </p>
         </div>
         <div>
           <label>Prompt hint (appended to system prompt)</label>

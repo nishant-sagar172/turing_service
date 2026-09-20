@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.calls import RetryConfig, normalize_scheduled_at
+from app.services.workflows import WORKFLOW_CODE_PATTERN
 
 CONTACT_COLUMN = "contact_number"
 
@@ -28,6 +29,14 @@ class CreateBatchRequest(BaseModel):
         description="Optional pool of caller IDs (E.164).",
     )
     retry_config: RetryConfig | None = None
+    workflow_code: str | None = Field(
+        default=None,
+        pattern=WORKFLOW_CODE_PATTERN,
+        description="Optional calling workflow (see GET /v1/workflows). Mirrors "
+        "Kalaam's workflows.workflow_code. Controls which call outcomes the "
+        "classifier may assign. When omitted, falls back to the client's "
+        "default_workflow_code, then to the common outcome set.",
+    )
     webhook_url: str | None = Field(
         default=None,
         description="Per-batch webhook for execution updates.",

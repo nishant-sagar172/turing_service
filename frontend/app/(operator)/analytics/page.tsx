@@ -98,7 +98,7 @@ function OutcomeBars({ outcomes }: { outcomes: OutcomeBreakdown }) {
         ))
       ) : (
         <p className="muted" style={{ fontSize: 12 }}>
-          No dispositions recorded — these calls were analysed before the disposition rollout.
+          No dispositions recorded for this period.
         </p>
       )}
 
@@ -118,6 +118,10 @@ function OutcomeBars({ outcomes }: { outcomes: OutcomeBreakdown }) {
 
           {showDetail && (
             <div style={{ marginTop: 12 }}>
+              <p className="muted" style={{ fontSize: 11, marginTop: 0, marginBottom: 10 }}>
+                The same {outcomes.analyzed_count} calls broken down further — not
+                additional calls.
+              </p>
               {granular.map(([key, entry]) => (
                 <BarRow
                   key={key}
@@ -598,13 +602,15 @@ export default function AnalyticsPage() {
               <h2>Call volume over time</h2>
               <TimeseriesChart points={timeseries} />
 
-              {/* Timeseries outcome summary */}
+              {/* Per-day disposition summary */}
               {(() => {
-                // Columns are whatever outcomes appear anywhere in the range —
-                // the taxonomy is open-ended, so nothing is hardcoded here.
-                const columns = Array.from(
-                  new Set(timeseries.flatMap((p) => Object.keys(p.outcomes))),
-                ).sort();
+                // Columns are whichever dispositions appear anywhere in the
+                // range, in canonical order — nothing is hardcoded here.
+                const columns = orderedDispositions(
+                  Object.fromEntries(
+                    timeseries.flatMap((p) => Object.keys(p.by_disposition_status)).map((k) => [k, 0]),
+                  ),
+                ).map(([status]) => status);
                 if (columns.length === 0) return null;
                 return (
                   <div style={{ marginTop: 20, overflowX: "auto" }}>
@@ -614,7 +620,7 @@ export default function AnalyticsPage() {
                           <th>Date</th>
                           <th>Total</th>
                           <th>Connected</th>
-                          {columns.map((k) => <th key={k}>{outcomeLabel(k)}</th>)}
+                          {columns.map((k) => <th key={k}>{k}</th>)}
                         </tr>
                       </thead>
                       <tbody>
@@ -623,7 +629,7 @@ export default function AnalyticsPage() {
                             <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{p.date.slice(0, 10)}</td>
                             <td>{p.total}</td>
                             <td>{p.connected}</td>
-                            {columns.map((k) => <td key={k} className="muted">{p.outcomes[k] ?? 0}</td>)}
+                            {columns.map((k) => <td key={k} className="muted">{p.by_disposition_status[k] ?? 0}</td>)}
                           </tr>
                         ))}
                       </tbody>

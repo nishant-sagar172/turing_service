@@ -14,20 +14,13 @@ import type {
   ClientSummary,
   Execution,
   PhoneNumbersResponse,
+  WorkflowOption,
 } from "@/lib/types";
 
-const OUTCOME_COLORS: Record<string, string> = {
-  booking: "var(--green)",
-  escalation: "var(--amber)",
-  not_interested: "var(--red)",
-  no_output: "var(--muted)",
-  follow_up: "var(--accent)",
-  other: "var(--muted)",
-  not_reached: "var(--muted)",
-};
+import { outcomeColor, outcomeLabel } from "@/lib/outcomes";
 
 function OutcomeBadge({ outcome }: { outcome: string }) {
-  const color = OUTCOME_COLORS[outcome] ?? "var(--muted)";
+  const color = outcomeColor(outcome);
   return (
     <span style={{
       fontSize: 11, padding: "2px 8px", borderRadius: 20, fontWeight: 600,
@@ -36,7 +29,7 @@ function OutcomeBadge({ outcome }: { outcome: string }) {
       color,
       whiteSpace: "nowrap",
     }}>
-      {outcome.replace("_", " ")}
+      {outcomeLabel(outcome)}
     </span>
   );
 }
@@ -135,7 +128,7 @@ function CallRecordsPanel({ clientId }: { clientId: string }) {
                 <td className="muted" style={{ fontSize: 12, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{call.agent_id ?? "—"}</td>
                 <td className="muted">{call.duration != null ? `${call.duration.toFixed(1)}s` : "—"}</td>
                 <td className="muted">{call.cost != null ? `$${call.cost.toFixed(4)}` : "—"}</td>
-                <td>{call.analysis ? <OutcomeBadge outcome={call.analysis.outcome} /> : <span className="muted" style={{ fontSize: 12 }}>—</span>}</td>
+                <td>{call.analysis?.call_outcome ? <OutcomeBadge outcome={call.analysis.call_outcome} /> : <span className="muted" style={{ fontSize: 12 }}>—</span>}</td>
                 <td className="muted" style={{ fontSize: 12 }}>{new Date(call.created_at).toLocaleDateString()}</td>
                 <td>
                   <button className="secondary" style={{ fontSize: 12, padding: "3px 10px" }}
@@ -182,9 +175,14 @@ export default function CallsPage() {
   const [clientId, setClientId] = useState("");
   const [clientAgents, setClientAgents] = useState<ClientAgent[]>([]);
 
+  // isAdmin is only known after mount; until then no fetch may assume a mode,
+  // or the tenant branch fires for an operator and 401s before correcting.
+  const [modeReady, setModeReady] = useState(false);
+
   useEffect(() => {
     const key = getApiKey() ?? process.env.NEXT_PUBLIC_TURING_API_KEY ?? "";
     setIsAdmin(!key);
+    setModeReady(true);
   }, []);
 
   useEffect(() => {
@@ -196,6 +194,7 @@ export default function CallsPage() {
   }, []);
 
   const [numbers, setNumbers] = useState<PhoneNumbersResponse | null>(null);
+  const [numbersError, setNumbersError] = useState<string | null>(null);
   const [agentId, setAgentId] = useState("");
 
   useEffect(() => {
@@ -209,6 +208,17 @@ export default function CallsPage() {
   const [recipient, setRecipient] = useState("");
   const [fromNumber, setFromNumber] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
+
+  const [workflows, setWorkflows] = useState<WorkflowOption[]>([]);
+  const [workflowsError, setWorkflowsError] = useState<string | null>(null);
+  const [workflowCode, setWorkflowCode] = useState("");
+  useEffect(() => {
+    if (!modeReady) return;
+    api
+      .workflows()
+      .then(setWorkflows)
+      .catch((e) => setWorkflowsError(e instanceof Error ? e.message : String(e)));
+  }, [modeReady]);
 
   const [vars, setVars] = useState<AgentVariables | null>(null);
   const [varValues, setVarValues] = useState<Record<string, string>>({});
@@ -224,9 +234,35 @@ export default function CallsPage() {
   const [trackError, setTrackError] = useState<string | null>(null);
   const [tracking, setTracking] = useState(false);
 
+  // Operator sessions hold no tenant API key, so the tenant /v1/phone-numbers
+  // route 401s for them — admins must read the client's numbers through the
+  // admin proxy instead, and re-read whenever the selected client changes.
   useEffect(() => {
-    api.phoneNumbers().then(setNumbers).catch(() => setNumbers(null));
-  }, []);
+    setNumbers(null);
+    setNumbersError(null);
+    if (!modeReady) return;
+
+    if (!isAdmin) {
+      api
+        .phoneNumbers()
+        .then(setNumbers)
+        .catch((e) => setNumbersError(e instanceof Error ? e.message : String(e)));
+      return;
+    }
+
+    if (!clientId) return;
+    Promise.all([
+      adminApi.getClientPhoneNumbers(clientId),
+      adminApi.getConfig(clientId).catch(() => null),
+    ])
+      .then(([assigned, config]) =>
+        setNumbers({
+          default_from_number: config?.default_from_number ?? null,
+          phone_numbers: assigned,
+        }),
+      )
+      .catch((e) => setNumbersError(e instanceof Error ? e.message : String(e)));
+  }, [modeReady, isAdmin, clientId]);
 
   useEffect(() => {
     setVars(null);
@@ -264,13 +300,20 @@ export default function CallsPage() {
     setSubmitting(true);
     try {
       const userData = buildUserData();
-      const res = await api.makeCall({
+      const payload = {
         agent_id: agentId.trim(),
         recipient_phone_number: recipient.trim(),
         ...(fromNumber ? { from_phone_number: fromNumber } : {}),
         ...(userData ? { user_data: userData } : {}),
         ...(scheduledAt ? { scheduled_at: toOffsetIso(scheduledAt) } : {}),
-      });
+        ...(workflowCode ? { workflow_code: workflowCode } : {}),
+      };
+      // Operator sessions hold no tenant API key — they place calls for the
+      // selected client through the admin proxy instead.
+      const res =
+        isAdmin && clientId
+          ? await adminApi.makeClientCall(clientId, payload)
+          : await api.makeCall(payload);
       setResult(res as Record<string, unknown>);
       if (res.execution_id) setTrackId(res.execution_id);
     } catch (e) {
@@ -364,6 +407,15 @@ export default function CallsPage() {
                 </option>
               ))}
             </select>
+            {numbersError ? (
+              <p style={{ fontSize: 11, color: "var(--red)", margin: "4px 0 0" }}>
+                Could not load numbers — {numbersError}
+              </p>
+            ) : numbers && numbers.phone_numbers.length === 0 ? (
+              <p className="muted" style={{ fontSize: 11, margin: "4px 0 0" }}>
+                No numbers assigned to this client. Assign them under Phone Numbers.
+              </p>
+            ) : null}
           </div>
           <div>
             <label>Schedule at (optional)</label>
@@ -374,6 +426,27 @@ export default function CallsPage() {
             />
           </div>
         </div>
+
+        {workflowsError && (
+          <p style={{ fontSize: 11, color: "var(--red)", margin: "4px 0 0" }}>
+            Could not load workflows — {workflowsError}
+          </p>
+        )}
+        {workflows.length > 0 && (
+          <>
+            <label>Workflow (optional)</label>
+            <select value={workflowCode} onChange={(e) => setWorkflowCode(e.target.value)}>
+              <option value="">Not specified — use client default</option>
+              {workflows.map((t) => (
+                <option key={t.workflow_code} value={t.workflow_code}>{t.label}</option>
+              ))}
+            </select>
+            <p className="hint">
+              {workflows.find((t) => t.workflow_code === workflowCode)?.description
+                ?? "Decides which call outcomes the classifier may assign."}
+            </p>
+          </>
+        )}
 
         <label>Agent variables</label>
         {!agentId ? (

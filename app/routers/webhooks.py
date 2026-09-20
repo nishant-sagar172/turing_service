@@ -4,23 +4,15 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.call_status import normalize_batch_status
 from app.config import Settings, get_settings
-from app.db.models import Batch
 from app.db.session import get_session
 from app.dependencies import get_voice_engine
-from app.services import outcome_notifier
-from app.services.analysis import run_analysis_for_call
-from app.services.analytics import TERMINAL
 from app.services.batch_sync import sync_batch_executions
-from app.services.store import (
-    extract_voice_batch_id,
-    get_batch_by_voice_id_global,
-    upsert_call_from_execution,
-)
-from app.services.tenants import get_config
+from app.services.call_sync import complete_call, sync_execution
+from app.services.store import get_batch_by_voice_id_global
 
 logger = logging.getLogger("turing.webhooks")
 
@@ -77,9 +69,9 @@ async def _handle_batch_webhook(
             },
         )
 
-    status = payload.get("status")
+    status = normalize_batch_status(payload.get("status"))
     if status:
-        batch.status = str(status)
+        batch.status = status
 
     synced = 0
     if status in BATCH_TERMINAL_STATUSES:
@@ -114,7 +106,7 @@ async def voice_webhook(
             request, payload, background_tasks, session, settings
         )
 
-    call = await upsert_call_from_execution(session, payload)
+    call, just_finished = await sync_execution(session, payload)
     if call is None:
         raise HTTPException(
             status_code=422,
@@ -124,35 +116,22 @@ async def voice_webhook(
                 "to a client.",
             },
         )
+    await session.commit()
 
-    voice_batch_id = extract_voice_batch_id(payload)
-    if voice_batch_id is None and call.batch_id is not None:
-        result = await session.execute(
-            select(Batch.voice_batch_id).where(Batch.id == call.batch_id)
-        )
-        voice_batch_id = result.scalar_one_or_none()
-
-    config = await get_config(session, call.client_id)
-    outcome = outcome_notifier.build_lean_outcome(call, voice_batch_id)
-    forwarded = await outcome_notifier.forward_outcome(
-        outcome,
-        webhook_url=config.webhook_url if config else None,
-        webhook_secret=config.webhook_secret if config else None,
-    )
+    # Bolna populates the transcript, recording and extracted_data on the
+    # terminal `completed` event itself (call-disconnected is non-terminal and
+    # carries none), so the terminal transition is the right and only trigger.
+    if just_finished:
+        background_tasks.add_task(complete_call, call.id, settings)
 
     logger.info(
-        "Voice webhook: call=%s status=%s forwarded=%s",
+        "Voice webhook: call=%s status=%s completing=%s",
         call.voice_call_id,
         call.status,
-        forwarded,
+        just_finished,
     )
-
-    # Fire-and-forget analysis for all terminal calls.
-    if call.status in TERMINAL:
-        background_tasks.add_task(run_analysis_for_call, str(call.id), settings)
-
     return {
         "received": True,
         "execution_id": call.voice_call_id,
-        "forwarded": forwarded,
+        "completing": just_finished,
     }

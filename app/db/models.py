@@ -123,6 +123,7 @@ class ClientConfig(TimestampMixin, Base):
     analysis_llm_model: Mapped[str | None] = mapped_column(String(128))
     analysis_prompt_hint: Mapped[str | None] = mapped_column(Text)
     analysis_llm_api_key_enc: Mapped[str | None] = mapped_column(Text)
+    default_workflow_code: Mapped[str | None] = mapped_column(String(32))
 
     client: Mapped[Client] = relationship(back_populates="config")
 
@@ -265,6 +266,7 @@ class Batch(TimestampMixin, Base):
     valid_count: Mapped[int | None] = mapped_column(Integer)
     scheduled_at: Mapped[str | None] = mapped_column(String(64))
     recipients_snapshot: Mapped[list[Any] | None] = mapped_column(JSONB)
+    workflow_code: Mapped[str | None] = mapped_column(String(32))
 
     calls: Mapped[list[Call]] = relationship(back_populates="batch")
 
@@ -294,7 +296,13 @@ class Call(TimestampMixin, Base):
     )
     agent_id: Mapped[str] = mapped_column(String(64), nullable=False)
     contact_number: Mapped[str | None] = mapped_column(String(32), index=True)
+    # Single calls only; batch calls read these from their batch.
+    from_number: Mapped[str | None] = mapped_column(String(32))
+    workflow_code: Mapped[str | None] = mapped_column(String(32))
     patient_ref: Mapped[str | None] = mapped_column(String(128), index=True)
+    # The client's own row id, echoed back so they can match an outcome to
+    # the record they sent without relying on phone or patient_ref.
+    client_ref: Mapped[str | None] = mapped_column(String(128), index=True)
     voice_call_id: Mapped[str | None] = mapped_column(String(64), index=True)
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
     transcript: Mapped[str | None] = mapped_column(Text)
@@ -309,6 +317,14 @@ class Call(TimestampMixin, Base):
     hangup_reason: Mapped[str | None] = mapped_column(String(128))
     retry_count: Mapped[int | None] = mapped_column(Integer)
     raw_payload: Mapped[dict | None] = mapped_column(JSONB)
+    # Set once the terminal outcome has been delivered to the client (or there
+    # was nothing to deliver). NULL means "still owes a client notification":
+    # completion claims the row with a conditional UPDATE so the outcome is
+    # forwarded exactly once, and the recovery pass re-picks any NULL terminal
+    # row left behind by a crash or a failed delivery.
+    notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
 
     batch: Mapped[Batch | None] = relationship(back_populates="calls")
     analysis: Mapped[CallAnalysis | None] = relationship(
@@ -348,7 +364,11 @@ class CallAnalysis(TimestampMixin, Base):
     batch_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("batches.id", ondelete="SET NULL"), index=True
     )
-    outcome: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    call_outcome: Mapped[str | None] = mapped_column(String(64), index=True)
+    disposition_status: Mapped[str | None] = mapped_column(String(64), index=True)
+    sub_status: Mapped[str | None] = mapped_column(String(64))
+    # Mirrors Kalaam's workflows.workflow_code — not a Kalaam "task type".
+    workflow_code: Mapped[str | None] = mapped_column(String(32), index=True)
     summary: Mapped[str | None] = mapped_column(Text)
     reason: Mapped[str | None] = mapped_column(Text)
     requests: Mapped[list[str] | None] = mapped_column(JSONB)

@@ -81,6 +81,18 @@ class Settings(BaseSettings):
         description="How often the in-process catalog sync task runs. Set to "
         "<= 0 to disable the periodic task (manual sync via admin endpoint only).",
     )
+    single_call_sync_interval_minutes: float = Field(
+        default=5.0,
+        description="How often open single calls are polled from the voice engine "
+        "(fallback for missed webhooks). Set to <= 0 to disable.",
+    )
+    completion_concurrency: int = Field(
+        default=5,
+        ge=1,
+        description="Max call completions (LLM analysis + client webhook) run "
+        "concurrently. Bounds background fan-out so a burst of finished calls "
+        "cannot exhaust the DB connection pool or the LLM provider rate limit.",
+    )
     api_key_cache_ttl_seconds: float = Field(
         default=60.0,
         description="TTL for the in-memory API-key -> tenant cache. Revocation "
@@ -113,14 +125,14 @@ class Settings(BaseSettings):
 
     # ── LLM analysis layer ────────────────────────────────────────────────────
     llm_provider: str = Field(
-        default="anthropic",
-        description="Default LLM provider for call analysis: 'anthropic' or 'openai'. "
+        default="openai",
+        description="Default LLM provider for call analysis: 'openai' or 'anthropic'. "
         "Overrideable per client via client_config.analysis_llm_provider.",
     )
     llm_model: str | None = Field(
         default=None,
-        description="Default model slug. Falls back to claude-haiku-4-5-20251001 "
-        "(anthropic) or gpt-4o-mini (openai) when unset.",
+        description="Default model slug. Falls back to gpt-5.6-luna (openai) or "
+        "claude-haiku-4-5-20251001 (anthropic) when unset.",
     )
     anthropic_api_key: str | None = Field(
         default=None,

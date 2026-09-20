@@ -45,15 +45,23 @@ def extract_contact_number(payload: dict[str, Any]) -> str | None:
     )
 
 
-def extract_patient_ref(payload: dict[str, Any]) -> str | None:
+def _recipient_field(payload: dict[str, Any], key: str) -> str | None:
     ctx = payload.get("context_details")
     if isinstance(ctx, dict):
         ctx_d = cast(dict[str, Any], ctx)
         recipient = ctx_d.get("recipient_data")
         if isinstance(recipient, dict):
-            ref = cast(dict[str, Any], recipient).get("patient_uhid")
-            return str(ref) if ref is not None else None
+            value = cast(dict[str, Any], recipient).get(key)
+            return str(value) if value is not None else None
     return None
+
+
+def extract_patient_ref(payload: dict[str, Any]) -> str | None:
+    return _recipient_field(payload, "patient_uhid")
+
+
+def extract_client_ref(payload: dict[str, Any]) -> str | None:
+    return _recipient_field(payload, "client_ref")
 
 
 def extract_voice_batch_id(payload: dict[str, Any]) -> str | None:
@@ -88,7 +96,7 @@ def _coerce_cost(payload: dict[str, Any]) -> float | None:
             payload.get("id"),
         )
         return None
-    return raw / 100
+    return float(raw) / 100
 
 
 def _call_fields_from_execution(payload: dict[str, Any]) -> dict[str, Any]:
@@ -123,6 +131,10 @@ async def record_call(
     voice_call_id: str,
     contact_number: str | None,
     status: str = "queued",
+    from_number: str | None = None,
+    workflow_code: str | None = None,
+    patient_ref: str | None = None,
+    client_ref: str | None = None,
 ) -> Call:
     """Seed an initial Call row for a single (non-batch) outbound call.
 
@@ -137,6 +149,10 @@ async def record_call(
             voice_call_id=voice_call_id,
             contact_number=contact_number,
             status=status,
+            from_number=from_number,
+            workflow_code=workflow_code,
+            patient_ref=patient_ref,
+            client_ref=client_ref,
         )
         .on_conflict_do_nothing(constraint="uq_call_client_voice_id")
     )
@@ -160,6 +176,7 @@ async def record_batch(
     total_count: int,
     voice_batch_id: str | None,
     status: str | None,
+    workflow_code: str | None = None,
 ) -> Batch:
     batch = Batch(
         client_id=client_id,
@@ -170,6 +187,7 @@ async def record_batch(
         total_count=total_count,
         voice_batch_id=voice_batch_id,
         status=status or "created",
+        workflow_code=workflow_code,
     )
     session.add(batch)
     await session.flush()
@@ -271,6 +289,7 @@ async def upsert_call_from_execution(
                 ),
                 contact_number=extract_contact_number(payload),
                 patient_ref=extract_patient_ref(payload),
+                client_ref=extract_client_ref(payload),
             )
             .on_conflict_do_nothing(constraint="uq_call_client_voice_id")
         )
@@ -290,6 +309,8 @@ async def upsert_call_from_execution(
         call.contact_number = extract_contact_number(payload)
     if call.patient_ref is None:
         call.patient_ref = extract_patient_ref(payload)
+    if call.client_ref is None:
+        call.client_ref = extract_client_ref(payload)
 
     await session.flush()
     return call

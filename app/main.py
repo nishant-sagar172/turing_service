@@ -38,9 +38,11 @@ from app.routers import (
     phone_numbers,
     portal,
     register,
+    workflows,
     webhooks,
 )
 from app.services.agent_sync import sync_catalog
+from app.services.call_sync import recover_unnotified_calls, sync_open_single_calls
 
 logger = logging.getLogger("turing_service")
 
@@ -56,6 +58,27 @@ async def _sync_loop(app: FastAPI, interval_minutes: float) -> None:
                 logger.info("Agent catalog sync: %s", result)
         except Exception:
             logger.exception("Agent catalog sync failed")
+
+
+async def _single_call_sync_loop(app: FastAPI, interval_minutes: float) -> None:
+    interval = interval_minutes * 60
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            settings = get_settings()
+            async with get_session_factory()() as session:
+                finished = await sync_open_single_calls(
+                    session, app.state.voice_engine, settings
+                )
+            # Separate session: durable backstop for terminal calls (single AND
+            # batch) whose completion was lost to a restart or a failed delivery.
+            async with get_session_factory()() as session:
+                recovered = await recover_unnotified_calls(session, settings)
+            logger.info(
+                "Single call sync: %d finished, %d recovered", finished, recovered
+            )
+        except Exception:
+            logger.exception("Single call sync failed")
 
 
 @asynccontextmanager
@@ -93,12 +116,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         sync_task = asyncio.create_task(
             _sync_loop(app, settings.agent_sync_interval_minutes)
         )
+    single_call_sync_task: asyncio.Task[None] | None = None
+    if settings.single_call_sync_interval_minutes > 0:
+        single_call_sync_task = asyncio.create_task(
+            _single_call_sync_loop(app, settings.single_call_sync_interval_minutes)
+        )
 
     try:
         yield
     finally:
         if sync_task is not None:
             sync_task.cancel()
+        if single_call_sync_task is not None:
+            single_call_sync_task.cancel()
         await app.state.voice_engine.aclose()
         if app.state.redis is not None:
             await app.state.redis.aclose()
@@ -134,6 +164,7 @@ def create_app() -> FastAPI:
     app.include_router(batches.router, prefix="/v1")
     app.include_router(phone_numbers.router, prefix="/v1")
     app.include_router(agents.router, prefix="/v1")
+    app.include_router(workflows.router, prefix="/v1")
 
     try:
         from app.routers import sql_agent

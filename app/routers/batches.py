@@ -13,6 +13,7 @@ from fastapi import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.call_status import normalize_batch_status
 from app.auth import TenantContext
 from app.config import Settings, get_settings
 from app.core.voice_engine import VoiceEngineClient, VoiceEngineError
@@ -37,6 +38,7 @@ from app.services.store import (
     get_batch_by_voice_id,
     record_batch,
 )
+from app.services.workflows import VALID_WORKFLOW_CODES
 from app.services.tenants import get_config
 from app.services.variables import check, resolve_variables
 
@@ -120,9 +122,11 @@ async def create_batch(
         row_errors: list[dict[str, object]] = []
         extra_seen: set[str] = set()
         for index, recipient in enumerate(body.recipients):
-            provided = {k for k in recipient if k != CONTACT_COLUMN}
-            missing, extra = check(provided, contract)
-            extra_seen.update(extra)
+            # Every CSV column becomes a prompt variable, contact_number
+            # included, so it counts as provided; it is only excluded from the
+            # unused-variable warning, which it would otherwise always trip.
+            missing, extra = check(set(recipient), contract)
+            extra_seen.update(name for name in extra if name != CONTACT_COLUMN)
             if missing:
                 row_errors.append({"row": index, "missing": missing})
         if row_errors:
@@ -171,7 +175,8 @@ async def create_batch(
         recipients=body.recipients,
         total_count=len(body.recipients),
         voice_batch_id=response.batch_id,
-        status=response.state,
+        status=normalize_batch_status(response.state),
+        workflow_code=body.workflow_code,
     )
     return response
 
@@ -184,6 +189,10 @@ async def create_batch_from_csv(
         default=None,
         description='JSON array string, e.g. ["+91..."].',
     ),
+    workflow_code: str | None = Form(
+        default=None,
+        description="Optional calling workflow (see GET /v1/workflows).",
+    ),
     webhook_url: str | None = Form(default=None),
     tenant: TenantContext = Depends(get_current_tenant),
     voice_engine: VoiceEngineClient = Depends(get_voice_engine),
@@ -191,6 +200,15 @@ async def create_batch_from_csv(
     session: AsyncSession = Depends(get_session),
 ) -> CreateBatchResponse:
     await _require_agent_enabled(session, tenant, agent_id)
+
+    if workflow_code is not None and workflow_code not in VALID_WORKFLOW_CODES:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_workflow_code",
+                "message": f"workflow_code must be one of: {', '.join(sorted(VALID_WORKFLOW_CODES))}",
+            },
+        )
 
     numbers: list[str] | None = None
     if from_phone_numbers is not None:
@@ -223,7 +241,8 @@ async def create_batch_from_csv(
         recipients=None,  # raw CSV: no structured snapshot
         total_count=total,
         voice_batch_id=response.batch_id,
-        status=response.state,
+        status=normalize_batch_status(response.state),
+        workflow_code=workflow_code,
     )
     return response
 
@@ -241,7 +260,7 @@ async def schedule_batch(
     result = await voice_engine.schedule_batch(batch_id, body.to_voice_engine_payload())
     response = ScheduleBatchResponse.model_validate(result)
 
-    batch.status = response.state or "scheduled"
+    batch.status = normalize_batch_status(response.state) or "scheduled"
     batch.scheduled_at = body.scheduled_at
     return response
 
@@ -349,8 +368,9 @@ async def get_batch(
         try:
             live = await voice_engine.get_batch(batch_id)
             if isinstance(live, dict):
-                if live.get("status"):
-                    batch.status = str(live["status"])
+                live_status = normalize_batch_status(live.get("status"))
+                if live_status:
+                    batch.status = live_status
                 if live.get("valid_contacts") is not None:
                     batch.valid_count = live["valid_contacts"]
                 if live.get("scheduled_at"):
@@ -413,7 +433,7 @@ async def stop_batch(
 
     result = await voice_engine.stop_batch(batch_id)
     response = BatchActionResponse.model_validate(result)
-    batch.status = response.state or "stopped"
+    batch.status = normalize_batch_status(response.state) or "stopped"
     return response
 
 
