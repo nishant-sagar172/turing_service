@@ -13,6 +13,8 @@ deliberately identical (both 404) to avoid an oracle that distinguishes
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies import get_redis
@@ -25,7 +27,7 @@ router = APIRouter(prefix="/claim", tags=["claim"])
 @router.get("/{token}", response_model=ClaimPeekResponse)
 async def peek_claim(
     token: str,
-    redis=Depends(get_redis),
+    redis: Any = Depends(get_redis),
 ) -> ClaimPeekResponse:
     if redis is None:
         raise HTTPException(
@@ -53,7 +55,7 @@ async def peek_claim(
 @router.post("/{token}", response_model=ClaimResponse)
 async def burn_claim(
     token: str,
-    redis=Depends(get_redis),
+    redis: Any = Depends(get_redis),
 ) -> ClaimResponse:
     if redis is None:
         raise HTTPException(

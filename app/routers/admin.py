@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import math
 import uuid
+from typing import Any
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -34,6 +35,7 @@ from app.db.models import (
     CallAnalysis,
     Client,
     ClientApiKey,
+    ClientConfig,
 )
 from app.db.session import get_session
 from app.dependencies import get_redis, get_voice_engine
@@ -179,7 +181,7 @@ async def delete_client(
 async def approve_client(
     client_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    redis=Depends(get_redis),
+    redis: Any = Depends(get_redis),
     settings: Settings = Depends(get_settings),
 ) -> ApproveResponse:
     client = await _get_client_or_404(session, client_id)
@@ -205,7 +207,7 @@ async def approve_client(
                 raw_key=raw_key,
                 ttl_hours=settings.claim_link_ttl_hours,
             )
-            if token:
+            if token and settings.console_public_url:
                 claim_url = cl.build_claim_url(settings.console_public_url, token)
         except Exception as exc:
             log.warning("claim link creation failed for client %s: %s", client_id, exc)
@@ -293,7 +295,7 @@ async def revoke_key(
 # ── Config ────────────────────────────────────────────────────────────────────
 
 
-def _config_response(config) -> ClientConfigResponse:
+def _config_response(config: ClientConfig | None) -> ClientConfigResponse:
     if config is None:
         return ClientConfigResponse(
             default_from_number=None,

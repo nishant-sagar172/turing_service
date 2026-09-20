@@ -93,7 +93,8 @@ async def list_my_keys(
     tenant: TenantContext = Depends(get_current_tenant),
     session: AsyncSession = Depends(get_session),
 ) -> list[KeySummary]:
-    return await tenants.list_keys(session, tenant.client_id)
+    keys = await tenants.list_keys(session, tenant.client_id)
+    return [KeySummary.model_validate(key, from_attributes=True) for key in keys]
 
 
 @router.post("/keys", response_model=IssueKeyResponse, status_code=201)

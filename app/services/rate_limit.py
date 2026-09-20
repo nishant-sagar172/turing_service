@@ -65,7 +65,7 @@ async def _redis_hit(
         # of ongoing traffic — resetting on every hit would lock out persistent
         # callers forever by preventing the key from ever expiring.
         await redis.expire(key, window_seconds)
-    return count > limit
+    return bool(count > limit)
 
 
 def _memory_hit(*, bucket: str, limit: int, window_seconds: int) -> bool:

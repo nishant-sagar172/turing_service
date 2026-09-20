@@ -12,6 +12,8 @@ client IP rather than the proxy IP.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,7 +33,7 @@ async def register(
     body: RegisterRequest,
     settings: Settings = Depends(get_settings),
     session: AsyncSession = Depends(get_session),
-    redis=Depends(get_redis),
+    redis: Any = Depends(get_redis),
 ) -> RegisterResponse:
     ip = request.client.host if request.client else "unknown"
     if await rate_limit.hit(
