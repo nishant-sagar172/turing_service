@@ -17,7 +17,7 @@ import type {
   WorkflowOption,
 } from "@/lib/types";
 
-import { outcomeColor, outcomeLabel } from "@/lib/outcomes";
+import { DISPOSITION_ORDER, outcomeColor, outcomeLabel } from "@/lib/outcomes";
 
 function OutcomeBadge({ outcome }: { outcome: string }) {
   const color = outcomeColor(outcome);
@@ -49,6 +49,8 @@ function CallRecordsPanel({ clientId }: { clientId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState("");
+  const [dispositionFilter, setDispositionFilter] = useState("");
+  const [urgencyFilter, setUrgencyFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -56,11 +58,11 @@ function CallRecordsPanel({ clientId }: { clientId: string }) {
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    adminApi.listClientCalls(clientId, { page, page_size: 20, status: status || undefined, date_from: dateFrom || undefined, date_to: dateTo || undefined })
+    adminApi.listClientCalls(clientId, { page, page_size: 20, status: status || undefined, disposition_status: dispositionFilter || undefined, urgency: urgencyFilter || undefined, date_from: dateFrom || undefined, date_to: dateTo || undefined })
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [clientId, page, status, dateFrom, dateTo]);
+  }, [clientId, page, status, dispositionFilter, urgencyFilter, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -76,6 +78,20 @@ function CallRecordsPanel({ clientId }: { clientId: string }) {
           <label>Status</label>
           <select value={status} onChange={(e) => setStatus(e.target.value)}>
             {STATUSES.map((s) => <option key={s} value={s}>{s || "All statuses"}</option>)}
+          </select>
+        </div>
+        <div>
+          <label>Disposition</label>
+          <select value={dispositionFilter} onChange={(e) => setDispositionFilter(e.target.value)}>
+            <option value="">All dispositions</option>
+            {DISPOSITION_ORDER.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <label>Urgency</label>
+          <select value={urgencyFilter} onChange={(e) => setUrgencyFilter(e.target.value)}>
+            <option value="">All urgencies</option>
+            {["low", "medium", "high"].map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
         </div>
         <div>
