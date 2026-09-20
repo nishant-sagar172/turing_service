@@ -22,6 +22,8 @@ services:
       POSTGRES_USER: ${TURING_PG_USER:-turing}
       POSTGRES_PASSWORD: ${TURING_PG_PASSWORD:?Set TURING_PG_PASSWORD in .env.prod}
       POSTGRES_DB: ${TURING_PG_DB:-turing_db}
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - turing-prod-pgdata:/var/lib/postgresql/data
     networks:

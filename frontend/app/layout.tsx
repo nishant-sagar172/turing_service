@@ -3,7 +3,7 @@ import "./globals.css";
 import GlassMouseTracker from "../components/GlassMouseTracker";
 
 export const metadata: Metadata = {
-  title: "turing · Bolna gateway",
+  title: "turing",
   description: "Development console for turing_service",
   icons: { icon: "data:," },
 };
