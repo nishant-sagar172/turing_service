@@ -88,46 +88,52 @@ always pick escalation.
   Still classify urgency, symptoms_reported, and requests as normal.
 
 - completed_visited: Patient or family confirms the visit/admission/procedure \
-has ALREADY been completed at THIS hospital. Already happened, past tense.
+has ALREADY been completed at THIS hospital (bed assigned, paperwork done). \
+Already happened, past tense.
   Signals: "आज ही consult करके आए", "ho gaya", "admit ho chuke hain", \
 "kal hi surgery hui", "already came", "procedure done", "दिखा के आए हैं"
   NOT: "aayenge" (future — that's scheduled_booking)
 
-- scheduled_booking: A specific date/appointment is FIXED and CONFIRMED for the \
-future. Patient or family explicitly agrees to a proposed slot or names one.
+- scheduled_booking: A specific date/appointment is FIXED and BOOKED for the \
+future but has not happened yet. Patient or family explicitly agrees to a \
+proposed slot or names one.
   Signals: "हां कर दीजिए", "10 September ko aa jayenge", "book kar do", \
 "हां perfect", "दस सितंबर को"
   NOT: "dekhte hain", "sochenge", "try karenge", "maybe next week" (follow_up)
   NOT: date proposed by agent but patient hasn't confirmed (follow_up)
 
-- done_elsewhere: Patient was treated/admitted at a DIFFERENT hospital. \
-Decision is final — they are not coming here.
+- done_elsewhere: Patient chose, or was already treated/admitted, at a \
+DIFFERENT hospital instead of this one. Decision is final — they are not \
+coming here.
   Signals: "doosre hospital mein karwa liya", "we went to [other hospital]", \
 "already admitted elsewhere", "wahan se treatment ho gaya"
 
-- wants_cost_estimate: Patient asking for approximate cost/package price \
-BEFORE deciding. No commitment yet.
+- wants_cost_estimate: Patient asking for an approximate cost/package price \
+BEFORE deciding anything. No commitment yet.
   Signals: "kitna kharcha aayega", "package cost kya hai", "estimate bhej do"
 
-- wants_discount: Patient HAS the cost estimate but finds it too expensive. \
-Asking for discount/negotiation.
+- wants_discount: Patient HAS the cost estimate but is concerned about \
+affordability (cost concern). Asking for a discount/negotiation.
   Signals: "bahut zyada hai", "kuch discount milega", "afford nahi kar sakte\""""
 
 _OUTCOME_DEFS_TAIL = """
 
-- waiting_doctor_confirmation: Doctor's final go-ahead still pending.
+- waiting_doctor_confirmation: The treating doctor's final go-ahead is still \
+pending before the plan can move forward.
   Signals: "doctor se puchna hai", "doctor ne abhi nahi bola"
 
-- waiting_referral_letter: A referral document (e.g. from the primary doctor \
-or insurer) is still required before proceeding.
+- waiting_referral_letter: A referral document (from the primary insurer) is \
+still required before admission/proceeding.
   Signals: "referral letter nahi aaya", "insurer se letter chahiye", \
 "referral chahiye hoga"
 
-- wants_second_opinion: Patient wants another doctor's opinion before deciding.
+- wants_second_opinion: Patient wants to consult, or has already consulted, \
+another doctor/hospital before committing.
   Signals: "doosre doctor se dikhayenge", "second opinion lena hai"
 
-- follow_up: Patient ACTIVELY asks to be contacted again or is undecided but \
-not refusing. They give a reason for delay or say "call later".
+- follow_up: No firm decision either way yet; the caller has to be contacted \
+again later. Patient ACTIVELY asks to be contacted again or is undecided but \
+not refusing. Use ONLY when no more specific outcome fits.
   Signals: "baad mein call karo", "sochenge", "family se baat karke batata \
 hoon", "main call karunga", "verify karke batata hoon", "dekhte hain"
   NOT: call just ending abruptly with no patient response (that's call_dropped)
@@ -191,8 +197,8 @@ follow_up (if they indicate willingness to reschedule) or call_dropped \
 reaching the appointment question = call_dropped, NOT no_output \
 (health was discussed).
 3. Every call MUST map to one of the listed outcomes. There is no "other" bucket.
-4. If confidence < 0.7 and you are torn between two outcomes, pick the one \
-that is SAFER for the patient (escalation > follow_up > declined).
+4. If torn between escalation and any other outcome, pick escalation. Never \
+default to follow_up when a more specific outcome matches what was actually said.
 5. Third party answering: classify based on what the third party communicates. \
 "Patient is fine, we'll come" = follow_up. "Patient went elsewhere" = \
 done_elsewhere. Third party can't relay = no_output.

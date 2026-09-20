@@ -55,20 +55,25 @@ _IPD_EXTRA_OUTCOMES = frozenset(
 
 _IPD_PROMPT_SECTION = """
 
-- insurance_concern: Decision blocked by insurance/TPA approval or coverage.
+- insurance_concern: Decision on hold because of an insurance/TPA approval or \
+coverage question.
   Signals: "insurance se hoga kya", "TPA approval pending", "cashless milega"
 
-- loan_required: Patient needs financing (EMI/medical loan).
+- loan_required: Patient needs financing help (EMI/medical loan) to afford \
+the treatment.
   Signals: "EMI ka option hai", "loan mil sakta hai", "installments mein"
 
-- on_medications: Admission deferred — patient on a medication course first.
+- on_medications: Patient is currently on a course of medicines and the \
+admission/procedure is deferred until it is done.
   Signals: "dawai chal rahi hai", "doctor ne 2 weeks bola hai"
 
-- waiting_reports: Tests done but results not back yet.
+- waiting_reports: Diagnostic tests (labs/scans) are done but results are \
+not back yet, so the decision is paused.
   Signals: "reports aane do", "test hua hai results pending", \
 "report test karke aana hai"
 
-- medical_clearance_pending: Needs fitness/clearance from another specialist.
+- medical_clearance_pending: Needs a fitness/clearance sign-off from another \
+specialist (e.g. cardiac, anaesthesia) before proceeding.
   Signals: "cardiac clearance chahiye", "anaesthesia clearance pending\""""
 
 
