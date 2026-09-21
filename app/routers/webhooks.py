@@ -11,7 +11,8 @@ from app.config import Settings, get_settings
 from app.db.session import get_session
 from app.dependencies import get_voice_engine
 from app.services.batch_sync import sync_batch_executions
-from app.services.call_sync import complete_call, sync_execution
+from app.services.call_sync import complete_call, notify_batch_status, sync_execution
+from app.services.outcome_notifier import build_batch_event
 from app.services.store import get_batch_by_voice_id_global
 
 logger = logging.getLogger("turing.webhooks")
@@ -72,6 +73,9 @@ async def _handle_batch_webhook(
     status = normalize_batch_status(payload.get("status"))
     if status:
         batch.status = status
+        background_tasks.add_task(
+            notify_batch_status, batch.client_id, build_batch_event(batch)
+        )
 
     synced = 0
     if status in BATCH_TERMINAL_STATUSES:

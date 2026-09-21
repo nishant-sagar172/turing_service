@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from app.db.models import Call, CallAnalysis
+from app.db.models import Batch, Call, CallAnalysis
 
 logger = logging.getLogger("turing.notifier")
 
@@ -76,6 +76,24 @@ def build_outcome(
         "extracted_data": call.extracted_data,
         "analysis": analysis_block,
     }
+
+
+def build_batch_event(batch: Batch) -> dict[str, Any]:
+    """Batch lifecycle change forwarded to a client's webhook (no call id)."""
+    return {
+        "event": "batch.status",
+        "turing_batch_id": batch.voice_batch_id,
+        "status": batch.status,
+        "valid_contacts": batch.valid_count,
+        "total_contacts": batch.total_count,
+        "scheduled_at": batch.scheduled_at,
+    }
+
+
+def batch_event_url(webhook_url: str) -> str:
+    """The client's outcome URL ends in /call-completed; batch events go to /events."""
+    base, sep, tail = webhook_url.rstrip("/").rpartition("/")
+    return f"{base}/events" if sep and tail == "call-completed" else webhook_url
 
 
 def sign_body(body: bytes, secret: str) -> str:
