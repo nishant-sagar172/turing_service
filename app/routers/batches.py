@@ -33,6 +33,8 @@ from app.schemas.batches import (
 from app.schemas.calls import ExecutionResponse, RetryConfig
 from app.services import agent_sync
 from app.services.batch_sync import sync_batch_executions
+from app.services.call_sync import notify_batch_status
+from app.services.outcome_notifier import build_batch_event
 from app.services.store import (
     batch_metrics,
     get_batch_by_voice_id,
@@ -425,6 +427,7 @@ async def get_batch_metrics(
 @router.post("/{batch_id}/stop", response_model=BatchActionResponse)
 async def stop_batch(
     batch_id: str,
+    background_tasks: BackgroundTasks,
     tenant: TenantContext = Depends(get_current_tenant),
     voice_engine: VoiceEngineClient = Depends(get_voice_engine),
     session: AsyncSession = Depends(get_session),
@@ -434,6 +437,9 @@ async def stop_batch(
     result = await voice_engine.stop_batch(batch_id)
     response = BatchActionResponse.model_validate(result)
     batch.status = normalize_batch_status(response.state) or "stopped"
+    background_tasks.add_task(
+        notify_batch_status, batch.client_id, build_batch_event(batch)
+    )
     return response
 
 
