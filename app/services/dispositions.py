@@ -36,7 +36,7 @@ DISPOSITION_MAP: dict[tuple[str, str], DispositionResult] = {
     (_ANY_WORKFLOW, "wants_discount"): DispositionResult("Cost Help", "Discount Asked"),
     # Second opinion
     (_ANY_WORKFLOW, "wants_second_opinion"): DispositionResult(
-        "Wants Second Opinion", "Wants Second Opinion"
+        "Wants Second Opinion", None
     ),
     # Waiting For Doctor Reports
     (_ANY_WORKFLOW, "waiting_doctor_confirmation"): DispositionResult(
@@ -46,7 +46,7 @@ DISPOSITION_MAP: dict[tuple[str, str], DispositionResult] = {
         "Waiting For Doctor Reports", "Report Pending"
     ),
     (_ANY_WORKFLOW, "waiting_referral_letter"): DispositionResult(
-        "Waiting for Referral Letter", "Waiting for Referral Letter"
+        "Waiting for Referral Letter", None
     ),
     # IPD finance / clearance
     (_ANY_WORKFLOW, "insurance_concern"): DispositionResult(
@@ -55,15 +55,13 @@ DISPOSITION_MAP: dict[tuple[str, str], DispositionResult] = {
     (_ANY_WORKFLOW, "loan_required"): DispositionResult(
         "Insurance Loan Pending", "Loan Approval Pending"
     ),
-    (_ANY_WORKFLOW, "on_medications"): DispositionResult(
-        "On Medications", "On Medications"
-    ),
+    (_ANY_WORKFLOW, "on_medications"): DispositionResult("On Medications", None),
     (_ANY_WORKFLOW, "medical_clearance_pending"): DispositionResult(
-        "Medical clearance pending", "Medical clearance pending"
+        "Medical clearance pending", None
     ),
     # Follow Up
     (_ANY_WORKFLOW, "follow_up"): DispositionResult("Follow Up", None),
-    (_ANY_WORKFLOW, "call_dropped"): DispositionResult("Follow Up", "Call Dropped"),
+    (_ANY_WORKFLOW, "call_dropped"): DispositionResult("Follow Up", None),
     # Not connected
     (_ANY_WORKFLOW, "not_connected"): DispositionResult("Couldn't reach", "Busy"),
     # Kept outside the client doc: escalation (patient safety) and no_output
@@ -91,3 +89,67 @@ def is_mapped_outcome(call_outcome: str, workflow_code: str = _ANY_WORKFLOW) -> 
         _ANY_WORKFLOW,
         call_outcome,
     ) in DISPOSITION_MAP
+
+
+# Temporary: pre-Kalaam coarse labels, served alongside the current ones.
+_LEGACY_DISPOSITION_MAP: dict[tuple[str, str], DispositionResult] = {
+    (_ANY_WORKFLOW, "escalation"): DispositionResult("Escalation", None),
+    (_ANY_WORKFLOW, "completed_visited"): DispositionResult("Converted", "Visited"),
+    (_ANY_WORKFLOW, "scheduled_booking"): DispositionResult(
+        "Converted", "Booking Scheduled"
+    ),
+    ("ipd", "done_elsewhere"): DispositionResult(
+        "Not Interested", "Admitted Elsewhere"
+    ),
+    (_ANY_WORKFLOW, "done_elsewhere"): DispositionResult(
+        "Not Interested", "Done Elsewhere"
+    ),
+    (_ANY_WORKFLOW, "declined"): DispositionResult("Not Interested", "Declined"),
+    (_ANY_WORKFLOW, "wants_cost_estimate"): DispositionResult(
+        "Follow Up", "Cost Estimate Requested"
+    ),
+    (_ANY_WORKFLOW, "wants_discount"): DispositionResult(
+        "Follow Up", "Discount Requested"
+    ),
+    (_ANY_WORKFLOW, "wants_second_opinion"): DispositionResult(
+        "Follow Up", "Second Opinion"
+    ),
+    (_ANY_WORKFLOW, "waiting_doctor_confirmation"): DispositionResult(
+        "Follow Up", "Doctor Confirmation Pending"
+    ),
+    (_ANY_WORKFLOW, "follow_up"): DispositionResult("Follow Up", "General Follow Up"),
+    (_ANY_WORKFLOW, "call_dropped"): DispositionResult("Follow Up", "Call Dropped"),
+    (_ANY_WORKFLOW, "insurance_concern"): DispositionResult(
+        "Follow Up", "Insurance/TPA Pending"
+    ),
+    (_ANY_WORKFLOW, "loan_required"): DispositionResult(
+        "Follow Up", "Loan/EMI Required"
+    ),
+    (_ANY_WORKFLOW, "on_medications"): DispositionResult("Follow Up", "On Medications"),
+    (_ANY_WORKFLOW, "waiting_reports"): DispositionResult(
+        "Follow Up", "Reports Pending"
+    ),
+    (_ANY_WORKFLOW, "medical_clearance_pending"): DispositionResult(
+        "Follow Up", "Medical Clearance Pending"
+    ),
+    (_ANY_WORKFLOW, "waiting_referral_letter"): DispositionResult(
+        "Follow Up", "Referral Letter Pending"
+    ),
+    (_ANY_WORKFLOW, "not_connected"): DispositionResult("Couldn't Reach", None),
+    (_ANY_WORKFLOW, "no_output"): DispositionResult("No Output", None),
+}
+
+_LEGACY_DEFAULT_DISPOSITION = DispositionResult("Follow Up", "General Follow Up")
+
+
+def resolve_legacy_disposition(
+    workflow_code: str | None, call_outcome: str | None
+) -> DispositionResult | None:
+    """Old-format (status, sub_status) for a stored outcome; None if unclassified."""
+    if not call_outcome:
+        return None
+    return (
+        _LEGACY_DISPOSITION_MAP.get((workflow_code or _ANY_WORKFLOW, call_outcome))
+        or _LEGACY_DISPOSITION_MAP.get((_ANY_WORKFLOW, call_outcome))
+        or _LEGACY_DEFAULT_DISPOSITION
+    )
