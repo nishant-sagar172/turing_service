@@ -140,6 +140,32 @@ async def complete_call(call_id: uuid.UUID, settings: Settings) -> None:
         logger.info("Call %s completed: forwarded=%s", call_id, forwarded)
 
 
+async def notify_batch_status(client_id: uuid.UUID, event: dict[str, Any]) -> bool:
+    """Forward a batch lifecycle change to the client's webhook. Best-effort.
+
+    Takes the already-built event so it never depends on the caller's
+    transaction having committed.
+    """
+    async with get_session_factory()() as session:
+        config = await get_config(session, client_id)
+        webhook_url = config.webhook_url if config else None
+        webhook_secret = config.webhook_secret if config else None
+    if not webhook_url:
+        return False
+    forwarded = await outcome_notifier.forward_outcome(
+        event,
+        webhook_url=outcome_notifier.batch_event_url(webhook_url),
+        webhook_secret=webhook_secret,
+    )
+    logger.info(
+        "Batch %s status=%s forwarded=%s",
+        event.get("turing_batch_id"),
+        event.get("status"),
+        forwarded,
+    )
+    return forwarded
+
+
 async def sync_open_single_calls(
     session: AsyncSession, voice_engine: VoiceEngineClient, settings: Settings
 ) -> int:
