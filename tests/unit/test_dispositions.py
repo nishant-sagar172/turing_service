@@ -17,6 +17,9 @@ from app.services.dispositions import (
     is_mapped_outcome,
     resolve_disposition,
     resolve_legacy_disposition,
+    legacy_outcome_filter_values,
+    resolve_legacy_outcome,
+    roll_up_legacy_outcomes,
 )
 from app.services.workflows import (
     NOT_CONNECTED_OUTCOME,
@@ -130,3 +133,46 @@ def test_legacy_disposition(
 
 def test_legacy_disposition_unclassified_is_none() -> None:
     assert resolve_legacy_disposition("opd", None) is None
+
+
+@pytest.mark.parametrize(
+    ("call_outcome", "expected"),
+    [
+        ("scheduled_booking", "booking"),
+        ("completed_visited", "booking"),
+        ("escalation", "escalation"),
+        ("declined", "not_interested"),
+        ("done_elsewhere", "not_interested"),
+        ("no_output", "no_output"),
+        ("not_connected", "not_reached"),
+        ("wants_discount", "follow_up"),
+        (None, None),
+    ],
+)
+def test_legacy_outcome(call_outcome: str | None, expected: str | None) -> None:
+    assert resolve_legacy_outcome(call_outcome) == expected
+
+
+def test_roll_up_legacy_outcomes_has_every_bucket() -> None:
+    rolled = roll_up_legacy_outcomes(
+        {"scheduled_booking": 2, "declined": 1, "wants_discount": 3, "not_connected": 4}
+    )
+    assert rolled == {
+        "booking": 2,
+        "escalation": 0,
+        "not_interested": 1,
+        "no_output": 0,
+        "follow_up": 3,
+        "other": 0,
+        "not_reached": 4,
+    }
+
+
+def test_legacy_outcome_filter_values() -> None:
+    assert legacy_outcome_filter_values("booking") == (
+        ["completed_visited", "scheduled_booking"],
+        False,
+    )
+    follow_up_values, negate = legacy_outcome_filter_values("follow_up")
+    assert negate is True
+    assert "scheduled_booking" in follow_up_values

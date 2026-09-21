@@ -19,6 +19,7 @@ from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Batch, Call, CallAnalysis
+from app.services.dispositions import roll_up_legacy_outcomes
 from app.schemas.analytics import (
     AgentStats,
     AnalyticsOverview,
@@ -105,6 +106,10 @@ def _outcome_breakdown(
         coverage_pct=coverage,
         by_call_outcome=_as_outcome_counts(outcome_counts),
         by_disposition_status=_as_outcome_counts(disposition_counts),
+        **{
+            bucket: _one(count)
+            for bucket, count in roll_up_legacy_outcomes(outcome_counts).items()
+        },
     )
 
 
@@ -618,4 +623,6 @@ async def get_timeseries(
                 point.by_disposition_status.get(row.disposition_status, 0) + count
             )
 
+    for point in points_by_date.values():
+        point.outcomes = roll_up_legacy_outcomes(point.by_call_outcome)
     return list(points_by_date.values())

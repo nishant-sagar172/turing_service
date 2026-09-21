@@ -8,13 +8,17 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from app.services.dispositions import resolve_legacy_disposition
+from app.services.dispositions import (
+    resolve_legacy_disposition,
+    resolve_legacy_outcome,
+)
 
 if TYPE_CHECKING:
     from app.db.models import CallAnalysis
 
 
 class CallAnalysisResult(BaseModel):
+    outcome: str | None = None
     call_outcome: str | None = None
     disposition_status: str | None = None
     sub_status: str | None = None
@@ -38,6 +42,7 @@ class CallAnalysisResult(BaseModel):
             analysis.workflow_code, analysis.call_outcome
         )
         return cls(
+            outcome=resolve_legacy_outcome(analysis.call_outcome),
             call_outcome=analysis.call_outcome,
             disposition_status=analysis.disposition_status,
             sub_status=analysis.sub_status,

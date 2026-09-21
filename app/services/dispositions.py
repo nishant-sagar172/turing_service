@@ -153,3 +153,62 @@ def resolve_legacy_disposition(
         or _LEGACY_DISPOSITION_MAP.get((_ANY_WORKFLOW, call_outcome))
         or _LEGACY_DEFAULT_DISPOSITION
     )
+
+
+_LEGACY_OUTCOME_BY_CALL_OUTCOME: dict[str, str] = {
+    "completed_visited": "booking",
+    "scheduled_booking": "booking",
+    "escalation": "escalation",
+    "done_elsewhere": "not_interested",
+    "declined": "not_interested",
+    "no_output": "no_output",
+    "not_connected": "not_reached",
+}
+
+
+def resolve_legacy_outcome(call_outcome: str | None) -> str | None:
+    """Old coarse `outcome` bucket for a stored call_outcome; None if unclassified."""
+    if not call_outcome:
+        return None
+    return _LEGACY_OUTCOME_BY_CALL_OUTCOME.get(call_outcome, "follow_up")
+
+
+LEGACY_OUTCOME_BUCKETS = (
+    "booking",
+    "escalation",
+    "not_interested",
+    "no_output",
+    "follow_up",
+    "other",
+    "not_reached",
+)
+
+
+def roll_up_legacy_outcomes(call_outcome_counts: dict[str, int]) -> dict[str, int]:
+    """Old `outcome` bucket counts (every bucket present) from call_outcome counts."""
+    buckets = dict.fromkeys(LEGACY_OUTCOME_BUCKETS, 0)
+    for call_outcome, count in call_outcome_counts.items():
+        bucket = resolve_legacy_outcome(call_outcome)
+        if bucket is not None:
+            buckets[bucket] += count
+    return buckets
+
+
+def legacy_outcome_filter_values(legacy_outcome: str) -> tuple[list[str], bool]:
+    """(call_outcomes, negate) selecting rows in an old `outcome` bucket.
+
+    `follow_up` is the catch-all, so it is expressed as "not in the others".
+    """
+    if legacy_outcome == "follow_up":
+        explicit = [
+            call_outcome
+            for call_outcome, bucket in _LEGACY_OUTCOME_BY_CALL_OUTCOME.items()
+            if bucket != "follow_up"
+        ]
+        return explicit, True
+    matching = [
+        call_outcome
+        for call_outcome, bucket in _LEGACY_OUTCOME_BY_CALL_OUTCOME.items()
+        if bucket == legacy_outcome
+    ]
+    return matching, False
