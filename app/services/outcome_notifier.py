@@ -20,6 +20,7 @@ from typing import Any
 import httpx
 
 from app.db.models import Batch, Call, CallAnalysis
+from app.services.dispositions import resolve_legacy_disposition
 
 logger = logging.getLogger("turing.notifier")
 
@@ -36,11 +37,18 @@ def build_outcome(
     """
     from_number = call.from_number or (call.batch.from_number if call.batch else None)
 
+    legacy = (
+        resolve_legacy_disposition(analysis.workflow_code, analysis.call_outcome)
+        if analysis
+        else None
+    )
     analysis_block = (
         {
             "call_outcome": analysis.call_outcome,
             "disposition_status": analysis.disposition_status,
             "sub_status": analysis.sub_status,
+            "legacy_disposition_status": legacy.status if legacy else None,
+            "legacy_sub_status": legacy.sub_status if legacy else None,
             "workflow_code": analysis.workflow_code,
             "summary": analysis.summary,
             "reason": analysis.reason,
