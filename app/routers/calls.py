@@ -24,6 +24,7 @@ from app.schemas.analysis import (
 from app.schemas.calls import MakeCallRequest, MakeCallResponse, StopCallResponse
 from app.services.analysis import analyze_call
 from app.services.call_placement import place_call
+from app.services.dispositions import legacy_outcome_filter_values
 from app.services.call_sync import complete_call, sync_execution
 from app.services.store import (
     TERMINAL_STATUSES,
@@ -86,6 +87,10 @@ async def list_calls(
     disposition_status: str | None = Query(
         default=None, description="Disposition status, e.g. 'Follow Up'."
     ),
+    outcome: str | None = Query(
+        default=None,
+        description="Deprecated coarse bucket, e.g. 'booking'. Use call_outcome.",
+    ),
     urgency: str | None = Query(default=None),
     q: str | None = Query(
         default=None, description="Substring search on contact number."
@@ -106,6 +111,12 @@ async def list_calls(
         filters.append(Call.status == status)
     if call_outcome:
         filters.append(CallAnalysis.call_outcome == call_outcome)
+    if outcome:
+        legacy_values, negate = legacy_outcome_filter_values(outcome)
+        column = CallAnalysis.call_outcome
+        filters.append(
+            column.notin_(legacy_values) if negate else column.in_(legacy_values)
+        )
     if disposition_status:
         filters.append(CallAnalysis.disposition_status == disposition_status)
     if urgency:
@@ -117,7 +128,7 @@ async def list_calls(
     if date_to:
         filters.append(Call.created_at <= date_to)
 
-    needs_analysis_join = bool(call_outcome or disposition_status or urgency)
+    needs_analysis_join = bool(call_outcome or disposition_status or urgency or outcome)
 
     count_query = select(func.count()).select_from(Call)
     page_query = select(Call).options(

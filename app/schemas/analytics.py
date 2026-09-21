@@ -43,6 +43,14 @@ class OutcomeBreakdown(BaseModel):
     coverage_pct: float
     by_call_outcome: dict[str, OutcomeCount]
     by_disposition_status: dict[str, OutcomeCount]
+    # Temporary backward compatibility: the pre-disposition fixed buckets.
+    booking: OutcomeCount
+    escalation: OutcomeCount
+    not_interested: OutcomeCount
+    no_output: OutcomeCount
+    follow_up: OutcomeCount
+    other: OutcomeCount
+    not_reached: OutcomeCount
 
 
 class RetryStats(BaseModel):
@@ -91,3 +99,4 @@ class TimeseriesPoint(BaseModel):
     not_connected: int
     by_call_outcome: dict[str, int]
     by_disposition_status: dict[str, int]
+    outcomes: dict[str, int] = {}
