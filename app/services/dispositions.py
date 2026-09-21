@@ -153,3 +153,21 @@ def resolve_legacy_disposition(
         or _LEGACY_DISPOSITION_MAP.get((_ANY_WORKFLOW, call_outcome))
         or _LEGACY_DEFAULT_DISPOSITION
     )
+
+
+_LEGACY_OUTCOME_BY_CALL_OUTCOME: dict[str, str] = {
+    "completed_visited": "booking",
+    "scheduled_booking": "booking",
+    "escalation": "escalation",
+    "done_elsewhere": "not_interested",
+    "declined": "not_interested",
+    "no_output": "no_output",
+    "not_connected": "not_reached",
+}
+
+
+def resolve_legacy_outcome(call_outcome: str | None) -> str | None:
+    """Old coarse `outcome` bucket for a stored call_outcome; None if unclassified."""
+    if not call_outcome:
+        return None
+    return _LEGACY_OUTCOME_BY_CALL_OUTCOME.get(call_outcome, "follow_up")

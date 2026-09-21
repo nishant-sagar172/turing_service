@@ -17,6 +17,7 @@ from app.services.dispositions import (
     is_mapped_outcome,
     resolve_disposition,
     resolve_legacy_disposition,
+    resolve_legacy_outcome,
 )
 from app.services.workflows import (
     NOT_CONNECTED_OUTCOME,
@@ -130,3 +131,21 @@ def test_legacy_disposition(
 
 def test_legacy_disposition_unclassified_is_none() -> None:
     assert resolve_legacy_disposition("opd", None) is None
+
+
+@pytest.mark.parametrize(
+    ("call_outcome", "expected"),
+    [
+        ("scheduled_booking", "booking"),
+        ("completed_visited", "booking"),
+        ("escalation", "escalation"),
+        ("declined", "not_interested"),
+        ("done_elsewhere", "not_interested"),
+        ("no_output", "no_output"),
+        ("not_connected", "not_reached"),
+        ("wants_discount", "follow_up"),
+        (None, None),
+    ],
+)
+def test_legacy_outcome(call_outcome: str | None, expected: str | None) -> None:
+    assert resolve_legacy_outcome(call_outcome) == expected
