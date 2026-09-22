@@ -267,6 +267,10 @@ class Batch(TimestampMixin, Base):
     scheduled_at: Mapped[str | None] = mapped_column(String(64))
     recipients_snapshot: Mapped[list[Any] | None] = mapped_column(JSONB)
     workflow_code: Mapped[str | None] = mapped_column(String(32))
+    # NULL means the client hasn't been notified of the current status yet.
+    notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
 
     calls: Mapped[list[Call]] = relationship(back_populates="batch")
 
