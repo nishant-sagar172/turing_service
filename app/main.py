@@ -42,7 +42,11 @@ from app.routers import (
     webhooks,
 )
 from app.services.agent_sync import sync_catalog
-from app.services.call_sync import recover_unnotified_calls, sync_open_single_calls
+from app.services.call_sync import (
+    recover_unnotified_batches,
+    recover_unnotified_calls,
+    sync_open_single_calls,
+)
 
 logger = logging.getLogger("turing_service")
 
@@ -74,8 +78,13 @@ async def _single_call_sync_loop(app: FastAPI, interval_minutes: float) -> None:
             # batch) whose completion was lost to a restart or a failed delivery.
             async with get_session_factory()() as session:
                 recovered = await recover_unnotified_calls(session, settings)
+            async with get_session_factory()() as session:
+                batches_recovered = await recover_unnotified_batches(session)
             logger.info(
-                "Single call sync: %d finished, %d recovered", finished, recovered
+                "Single call sync: %d finished, %d recovered, %d batches recovered",
+                finished,
+                recovered,
+                batches_recovered,
             )
         except Exception:
             logger.exception("Single call sync failed")

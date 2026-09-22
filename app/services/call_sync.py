@@ -21,7 +21,7 @@ from sqlalchemy.orm import selectinload
 from app.config import Settings
 from app.core.call_status import TERMINAL_STATUSES
 from app.core.voice_engine import VoiceEngineClient, VoiceEngineError
-from app.db.models import Call
+from app.db.models import Batch, Call
 from app.db.session import get_session_factory
 from app.services import outcome_notifier
 from app.services.analysis import run_analysis_for_call
@@ -33,6 +33,8 @@ logger = logging.getLogger("turing.call_sync")
 # Scheduled calls can stay queued for days; anything older is treated as abandoned.
 _LOOKBACK = timedelta(days=7)
 _MAX_CALLS_PER_PASS = 200
+_MAX_BATCHES_PER_PASS = 200
+_BATCH_RECOVERY_CONCURRENCY = 10
 
 # Bounds concurrent completions (each holds a DB session briefly plus an LLM call
 # and an HTTP POST). Sized lazily from Settings on first use; a module-level
@@ -140,23 +142,47 @@ async def complete_call(call_id: uuid.UUID, settings: Settings) -> None:
         logger.info("Call %s completed: forwarded=%s", call_id, forwarded)
 
 
-async def notify_batch_status(client_id: uuid.UUID, event: dict[str, Any]) -> bool:
-    """Forward a batch lifecycle change to the client's webhook. Best-effort.
+async def notify_batch_status(
+    batch_id: uuid.UUID, client_id: uuid.UUID, event: dict[str, Any]
+) -> bool:
+    """Forward a batch lifecycle change to the client's webhook, exactly once.
 
-    Takes the already-built event so it never depends on the caller's
-    transaction having committed.
+    Claims the row with a conditional UPDATE on Batch.notified_at, mirroring
+    complete_call's claim on Call.notified_at, so a redelivered Bolna webhook
+    cannot double-send; a failed delivery releases the claim so
+    recover_unnotified_batches retries it.
     """
     async with get_session_factory()() as session:
+        claimed = (
+            await session.execute(
+                update(Batch)
+                .where(Batch.id == batch_id, Batch.notified_at.is_(None))
+                .values(notified_at=datetime.now(timezone.utc))
+                .returning(Batch.id)
+            )
+        ).scalar_one_or_none()
+        if claimed is None:
+            await session.commit()
+            return False
         config = await get_config(session, client_id)
         webhook_url = config.webhook_url if config else None
         webhook_secret = config.webhook_secret if config else None
+        await session.commit()
+
     if not webhook_url:
         return False
+
     forwarded = await outcome_notifier.forward_outcome(
         event,
         webhook_url=outcome_notifier.batch_event_url(webhook_url),
         webhook_secret=webhook_secret,
     )
+    if not forwarded:
+        async with get_session_factory()() as session:
+            await session.execute(
+                update(Batch).where(Batch.id == batch_id).values(notified_at=None)
+            )
+            await session.commit()
     logger.info(
         "Batch %s status=%s forwarded=%s",
         event.get("turing_batch_id"),
@@ -164,6 +190,38 @@ async def notify_batch_status(client_id: uuid.UUID, event: dict[str, Any]) -> bo
         forwarded,
     )
     return forwarded
+
+
+async def recover_unnotified_batches(session: AsyncSession) -> int:
+    """Re-drive delivery for batches whose current status was never confirmed sent."""
+    batch_ids = (
+        (
+            await session.execute(
+                select(Batch.id)
+                .where(Batch.notified_at.is_(None))
+                .order_by(Batch.created_at)
+                .limit(_MAX_BATCHES_PER_PASS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not batch_ids:
+        return 0
+
+    semaphore = asyncio.Semaphore(_BATCH_RECOVERY_CONCURRENCY)
+
+    async def _resend(batch_id: uuid.UUID) -> None:
+        async with semaphore:
+            async with get_session_factory()() as s:
+                batch = await s.get(Batch, batch_id)
+            if batch is not None:
+                await notify_batch_status(
+                    batch.id, batch.client_id, outcome_notifier.build_batch_event(batch)
+                )
+
+    await asyncio.gather(*(_resend(batch_id) for batch_id in batch_ids))
+    return len(batch_ids)
 
 
 async def sync_open_single_calls(

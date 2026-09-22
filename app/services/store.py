@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any, cast
 
 from sqlalchemy import func, select
@@ -188,6 +189,8 @@ async def record_batch(
         voice_batch_id=voice_batch_id,
         status=status or "created",
         workflow_code=workflow_code,
+        # The caller's create-batch response already carries this status.
+        notified_at=datetime.now(timezone.utc),
     )
     session.add(batch)
     await session.flush()

@@ -437,8 +437,9 @@ async def stop_batch(
     result = await voice_engine.stop_batch(batch_id)
     response = BatchActionResponse.model_validate(result)
     batch.status = normalize_batch_status(response.state) or "stopped"
+    batch.notified_at = None
     background_tasks.add_task(
-        notify_batch_status, batch.client_id, build_batch_event(batch)
+        notify_batch_status, batch.id, batch.client_id, build_batch_event(batch)
     )
     return response
 

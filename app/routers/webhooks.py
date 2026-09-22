@@ -71,10 +71,11 @@ async def _handle_batch_webhook(
         )
 
     status = normalize_batch_status(payload.get("status"))
-    if status:
+    if status and status != batch.status:
         batch.status = status
+        batch.notified_at = None
         background_tasks.add_task(
-            notify_batch_status, batch.client_id, build_batch_event(batch)
+            notify_batch_status, batch.id, batch.client_id, build_batch_event(batch)
         )
 
     synced = 0
