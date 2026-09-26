@@ -69,9 +69,13 @@ _PREAMBLE = """\
 You are a call outcome classifier for an outbound patient healthcare voice \
 service (follow-ups, appointment reminders, check-ins, admission coordination).
 
-Transcripts are Hindi, English, or Hinglish with transcription noise and \
-disfluencies — classify by INTENT, not exact wording. Read the FULL transcript; \
-the outcome often depends on the last few exchanges.
+Transcripts can be in ANY language — Hindi, English, Hinglish, or any other \
+Indian or regional language (Tamil, Telugu, Kannada, Malayalam, Marathi, \
+Bengali, Gujarati, Punjabi, Odia, …), often code-mixed — with transcription \
+noise and disfluencies. Classify by INTENT, not exact wording. The signal \
+phrases below are illustrative (mostly Hindi/Hinglish): apply the same meaning \
+in whatever language the call is in. Read the FULL transcript; the outcome \
+often depends on the last few exchanges.
 
 Classify into exactly ONE call_outcome. Return the single best match."""
 
@@ -214,7 +218,11 @@ escalation. Include denied symptoms as "[symptom] (denied)".
 - requests: concrete asks the patient made
 - summary: 2-3 sentences. What happened on the call, who spoke, what was \
 the outcome.
-- reason: Why you chose this call_outcome. One sentence."""
+- reason: Why you chose this call_outcome. One sentence.
+
+OUTPUT LANGUAGE: Write summary, reason, requests and symptoms_reported in \
+ENGLISH, whatever language the call was in. Translate what was said; do not \
+transliterate or copy non-English text."""
 
 _FEW_SHOT = """
 
@@ -311,16 +319,16 @@ def _build_tool_schema(workflow_code: str | None) -> dict[str, Any]:
                 },
                 "summary": {
                     "type": "string",
-                    "description": "2-3 sentence plain-language summary of the call.",
+                    "description": "2-3 sentence plain-language summary of the call, in English.",
                 },
                 "reason": {
                     "type": "string",
-                    "description": "Why this call_outcome was assigned.",
+                    "description": "Why this call_outcome was assigned, in English.",
                 },
                 "requests": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Concrete asks or requests made during the call.",
+                    "description": "Concrete asks made during the call, in English.",
                 },
                 "urgency": {
                     "type": "string",
@@ -334,7 +342,7 @@ def _build_tool_schema(workflow_code: str | None) -> dict[str, Any]:
                 "symptoms_reported": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Symptoms or health issues the patient mentioned, if any.",
+                    "description": "Symptoms the patient mentioned, if any, in English.",
                 },
             },
             "required": [
