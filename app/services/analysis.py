@@ -215,14 +215,11 @@ reaction, vulnerable patient)
 ambiguous intent, transcript cut off at critical moment
 - symptoms_reported: ANY symptom mentioned, in ANY outcome — not just \
 escalation. Include denied symptoms as "[symptom] (denied)".
-- requests: concrete asks the patient made
-- summary: 2-3 sentences. What happened on the call, who spoke, what was \
-the outcome.
+- requests: concrete asks the patient (or whoever answered) made — not the agent's own questions or offers
+- summary: 2-3 sentences, crux first. Sentence 1: the decision point — what the agent offered or asked at the key moment and how the respondent answered (accepted / refused / deferred / reported a symptom), briefly quoting their decisive words translated to English when intent is subtle. Sentence 2: the concrete next step (date booked, callback promised, escalation reason, or none). Mention who answered only if it wasn't the patient. Skip greetings, introductions, and identity checks.
 - reason: Why you chose this call_outcome. One sentence.
 
-OUTPUT LANGUAGE: Write summary, reason, requests and symptoms_reported in \
-ENGLISH, whatever language the call was in. Translate what was said; do not \
-transliterate or copy non-English text."""
+OUTPUT LANGUAGE: Write summary, reason, requests and symptoms_reported in ENGLISH, whatever language the call was in. Translate what was said; do not transliterate or copy non-English text."""
 
 _FEW_SHOT = """
 
@@ -241,6 +238,9 @@ Agent asks about health. Son says "ma'am आज ही consult करके आ�
 pick up कर लेता हूं".
 → call_outcome: "completed_visited" (patient already visited today, \
 follow-up timeline is set by doctor)
+→ summary: "Offered a follow-up booking, the patient's son declined, saying \
+they consulted the doctor today and the next visit is in fifteen days. No \
+booking made; the son will coordinate directly with the doctor."
 
 EXAMPLE 3 — scheduled_booking:
 Agent asks if patient wants 10 September appointment. Patient says \
@@ -251,6 +251,9 @@ EXAMPLE 4 — escalation:
 Agent asks about joint/knee/back pain. Patient says "हां अभी है जी" and \
 "कल परसों है sir चालू होकर". Agent arranges urgent appointment.
 → call_outcome: "escalation" (ongoing/worsening pain reported)
+→ summary: "Asked about joint pain, the patient confirmed it is ongoing and \
+started again in the last day or two. Agent arranged an urgent appointment \
+for review."
 
 EXAMPLE 5 — declined:
 Agent proposes follow-up. Patient says "नहीं ma'am", explains "मेरी तबीयत \
@@ -262,6 +265,9 @@ EXAMPLE 6 — follow_up:
 Agent proposes 10 September. Son says "यह one thing मैं उनसे verify करूंगा" \
 and "मैं call करूंगा".
 → call_outcome: "follow_up" (actively deferred — will check and call back)
+→ summary: "Offered a 10 September appointment, the patient's son deferred, \
+saying he will verify with the patient and call back. No booking made; \
+awaiting the son's callback."
 
 EXAMPLE 7 — no_output:
 Agent introduces herself, asks "क्या मैं X जी से बात कर रही हूँ?" Patient \
@@ -328,25 +334,33 @@ def _build_tool_schema(workflow_code: str | None) -> dict[str, Any]:
     return {
         "name": "classify_call",
         "description": "Classify a call outcome and generate structured analysis.",
+        "strict": True,
         "input_schema": {
             "type": "object",
+            # reason precedes call_outcome so the model reasons before labelling.
             "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Why this call_outcome was assigned, in English.",
+                },
                 "call_outcome": {
                     "type": "string",
                     "enum": sorted(valid),
                 },
                 "summary": {
                     "type": "string",
-                    "description": "2-3 sentence plain-language summary of the call, in English.",
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "Why this call_outcome was assigned, in English.",
+                    "description": (
+                        "2-3 sentences in English, crux first: the decision point "
+                        "(what the agent offered and how the respondent answered), "
+                        "then the concrete next step."
+                    ),
                 },
                 "requests": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Concrete asks made during the call, in English.",
+                    "description": (
+                        "Concrete asks the patient (or whoever answered) made, in English."
+                    ),
                 },
                 "urgency": {
                     "type": "string",
@@ -363,10 +377,11 @@ def _build_tool_schema(workflow_code: str | None) -> dict[str, Any]:
                     "description": "Symptoms the patient mentioned, if any, in English.",
                 },
             },
+            "additionalProperties": False,
             "required": [
+                "reason",
                 "call_outcome",
                 "summary",
-                "reason",
                 "requests",
                 "urgency",
                 "confidence",
@@ -616,10 +631,8 @@ async def analyze_call(
     if result is None:
         return None
 
-    # OpenAI's strict schema makes an out-of-set value impossible; Anthropic's
-    # tool schema is advisory, so a hallucinated or cross-workflow outcome can
-    # still arrive. On this healthcare classifier an unrecognised value must
-    # fail SAFE, not silently become follow_up: downgrading a mislabelled
+    # Both providers run strict schemas, but on this healthcare classifier an
+    # unrecognised value must still fail SAFE, not silently become follow_up: downgrading a mislabelled
     # escalation to a routine follow-up buries a patient-safety event. Record
     # escalation instead — it is valid in every workflow and maps to the
     # "Escalation" disposition, so a human always reviews it.
