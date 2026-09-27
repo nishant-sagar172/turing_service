@@ -100,8 +100,8 @@ WORKFLOWS: dict[str, Workflow] = {
     "ipd": Workflow(
         code="ipd",
         label="IPD admission",
-        description="In-patient admission coordination — unlocks finance and "
-        "clearance outcomes.",
+        description="In-patient admission coordination — adds insurance, loan, "
+        "medications, reports and clearance outcomes.",
         extra_outcomes=_IPD_EXTRA_OUTCOMES,
         prompt_section=_IPD_PROMPT_SECTION,
     ),
@@ -111,12 +111,12 @@ WORKFLOWS: dict[str, Workflow] = {
     "cancer_workflow": Workflow(
         code="cancer_workflow",
         label="Cancer care",
-        description="Oncology pathways — currently uses the shared outcome set.",
+        description="Oncology pathways — Other Tasks outcomes, same as OPD.",
     ),
     "gynae_workflow": Workflow(
         code="gynae_workflow",
         label="Gynaecology",
-        description="Gynaecology pathways — currently uses the shared outcome set.",
+        description="Gynaecology pathways — Other Tasks outcomes, same as OPD.",
     ),
 }
 
