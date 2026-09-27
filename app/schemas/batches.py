@@ -41,6 +41,12 @@ class CreateBatchRequest(BaseModel):
         default=None,
         description="Per-batch webhook for execution updates.",
     )
+    batch_name: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Names the CSV uploaded to the engine (<batch_name>.csv). "
+        "Defaults to recipients.csv.",
+    )
 
     @model_validator(mode="after")
     def _check_contact_numbers(self) -> CreateBatchRequest:

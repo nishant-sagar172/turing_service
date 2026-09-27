@@ -17,7 +17,12 @@ from app.core.call_status import normalize_batch_status
 from app.auth import TenantContext
 from app.config import Settings, get_settings
 from app.core.voice_engine import VoiceEngineClient, VoiceEngineError
-from app.core.csv_utils import CONTACT_COLUMN, recipients_to_csv
+from app.core.csv_utils import (
+    CONTACT_COLUMN,
+    DEFAULT_CSV_NAME,
+    csv_file_name,
+    recipients_to_csv,
+)
 from app.db.models import Batch
 from app.db.session import get_session
 from app.dependencies import get_current_tenant, get_voice_engine
@@ -157,6 +162,7 @@ async def create_batch(
     result = await voice_engine.create_batch(
         agent_id=body.agent_id,
         csv_bytes=csv_bytes,
+        file_name=csv_file_name(body.batch_name),
         from_phone_numbers=from_numbers,
         retry_config=retry_field,
         webhook_url=webhook_url,
@@ -196,6 +202,11 @@ async def create_batch_from_csv(
         description="Optional calling workflow (see GET /v1/workflows).",
     ),
     webhook_url: str | None = Form(default=None),
+    batch_name: str | None = Form(
+        default=None,
+        max_length=200,
+        description="Names the CSV sent to the engine; defaults to the upload's name.",
+    ),
     tenant: TenantContext = Depends(get_current_tenant),
     voice_engine: VoiceEngineClient = Depends(get_voice_engine),
     settings: Settings = Depends(get_settings),
@@ -228,7 +239,7 @@ async def create_batch_from_csv(
     result = await voice_engine.create_batch(
         agent_id=agent_id,
         csv_bytes=csv_bytes,
-        file_name=file.filename or "recipients.csv",
+        file_name=csv_file_name(batch_name, fallback=file.filename or DEFAULT_CSV_NAME),
         from_phone_numbers=numbers,
         webhook_url=webhook_url or _default_webhook_url(settings),
     )

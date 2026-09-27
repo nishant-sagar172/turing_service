@@ -9,9 +9,19 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from typing import Any
 
 CONTACT_COLUMN = "contact_number"
+DEFAULT_CSV_NAME = "recipients.csv"
+_UNSAFE_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
+
+
+def csv_file_name(batch_name: str | None, fallback: str = DEFAULT_CSV_NAME) -> str:
+    """``<batch_name>.csv`` with filename-unsafe characters dropped; falls back
+    to ``fallback`` when nothing usable is left."""
+    stem = _UNSAFE_FILENAME_CHARS.sub("", batch_name or "").strip(" .")
+    return f"{stem[:150]}.csv" if stem else fallback
 
 
 def recipients_to_csv(recipients: list[dict[str, Any]]) -> bytes:
