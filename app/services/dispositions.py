@@ -63,12 +63,12 @@ DISPOSITION_MAP: dict[tuple[str, str], DispositionResult] = {
     # Follow Up
     (_ANY_WORKFLOW, "follow_up"): DispositionResult("Follow Up", None),
     (_ANY_WORKFLOW, "call_dropped"): DispositionResult("Follow Up", None),
+    # Kalaam has no "No Output" status; it writes Follow Up for these calls.
+    (_ANY_WORKFLOW, "no_output"): DispositionResult("Follow Up", None),
     # Not connected
     (_ANY_WORKFLOW, "not_connected"): DispositionResult("Couldn't Reach", "Busy"),
-    # Kept outside the client doc: escalation (patient safety) and no_output
-    # (connected but nothing usable — distinct from a non-connect).
+    # Kalaam writes no status for escalation; the label is display-only.
     (_ANY_WORKFLOW, "escalation"): DispositionResult("Escalation", None),
-    (_ANY_WORKFLOW, "no_output"): DispositionResult("No Output", None),
 }
 
 _DEFAULT_DISPOSITION = DispositionResult("Follow Up", None)

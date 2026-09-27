@@ -58,6 +58,7 @@ _CHANGES: list[tuple[str, tuple[str, str | None], tuple[str, str | None]]] = [
         ("Medical Clearance Pending", None),
     ),
     ("not_connected", ("Couldn't reach", "Busy"), ("Couldn't Reach", "Busy")),
+    ("no_output", ("No Output", None), ("Follow Up", None)),
 ]
 
 

@@ -22,7 +22,6 @@ export const DISPOSITION_ORDER = [
   "Follow Up",
   "Not Interested",
   "Escalation",
-  "No Output",
   "Couldn't Reach",
 ] as const;
 
@@ -39,7 +38,6 @@ const DISPOSITION_COLORS: Record<string, string> = {
   "Follow Up": "var(--accent)",
   "Not Interested": "var(--red)",
   Escalation: "var(--amber)",
-  "No Output": "var(--muted)",
   "Couldn't Reach": "var(--muted)",
 };
 

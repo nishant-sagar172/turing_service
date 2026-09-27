@@ -108,7 +108,7 @@ def test_outcomes_beyond_the_guide_are_the_documented_extras() -> None:
     assert mapped - set(IPD_GUIDE) == {"escalation", "call_dropped", "no_output"}
     assert resolve_disposition("ipd", "escalation") == ("Escalation", None)
     assert resolve_disposition("ipd", "call_dropped") == ("Follow Up", None)
-    assert resolve_disposition("ipd", "no_output") == ("No Output", None)
+    assert resolve_disposition("ipd", "no_output") == ("Follow Up", None)
 
 
 def test_an_unknown_outcome_falls_back_to_follow_up_and_is_reported_unmapped() -> None:
