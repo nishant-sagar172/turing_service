@@ -1030,6 +1030,9 @@ X-Admin-Key: your-admin-secret</pre>
     </div>
 
     <h4>Call Outcomes and Disposition Mapping</h4>
+    <div class="callout callout-warning">
+      <strong>Match these strings exactly.</strong> <code>disposition_status</code> and <code>sub_status</code> are Kalaam's status names, character for character (casing, <code>/</code>, straight apostrophe in <em>Couldn't Reach</em>). There is no <em>Declined</em> status: a declined call is <em>Not Interested / Other</em>.
+    </div>
     <p>The LLM classifies the call into one <code>call_outcome</code>. Turing then deterministically maps that to a <code>disposition_status</code> and <code>sub_status</code>.</p>
     <div class="table-wrap">
       <table>
@@ -1039,21 +1042,21 @@ X-Admin-Key: your-admin-secret</pre>
           <tr><td><code>completed_visited</code></td><td>Visit or procedure already completed at this hospital</td><td>Visited</td><td><em>null</em></td></tr>
           <tr><td><code>scheduled_booking</code></td><td>Specific future date confirmed by the patient</td><td>Booking</td><td><em>null</em></td></tr>
           <tr><td><code>done_elsewhere</code></td><td>Patient treated at a different hospital</td><td>Not Interested</td><td>Admitted Elsewhere <span class="field-type">(ipd)</span><br>Done Elsewhere <span class="field-type">(opd, cancer, gynae)</span></td></tr>
-          <tr><td><code>declined</code></td><td>Explicit, unambiguous refusal to proceed</td><td>Declined</td><td>Other</td></tr>
-          <tr><td><code>wants_cost_estimate</code></td><td>Asking for cost or package price before deciding</td><td>Cost Help</td><td>Waiting Estimate</td></tr>
-          <tr><td><code>wants_discount</code></td><td>Has the estimate, asking for a discount</td><td>Cost Help</td><td>Discount Asked</td></tr>
-          <tr><td><code>wants_second_opinion</code></td><td>Wants another doctor's opinion first</td><td>Wants Second Opinion</td><td><em>null</em></td></tr>
-          <tr><td><code>waiting_doctor_confirmation</code></td><td>Doctor's final go-ahead still pending</td><td>Waiting For Doctor Reports</td><td>Doctor OK Pending</td></tr>
+          <tr><td><code>declined</code></td><td>Explicit, unambiguous refusal to proceed</td><td>Not Interested</td><td>Other</td></tr>
+          <tr><td><code>wants_cost_estimate</code></td><td>Asking for cost or package price before deciding</td><td>Cost Help</td><td>Waiting estimate</td></tr>
+          <tr><td><code>wants_discount</code></td><td>Has the estimate, asking for a discount</td><td>Cost Help</td><td>Discount asked</td></tr>
+          <tr><td><code>wants_second_opinion</code></td><td>Wants another doctor's opinion first</td><td>Wants second opinion</td><td><em>null</em></td></tr>
+          <tr><td><code>waiting_doctor_confirmation</code></td><td>Doctor's final go-ahead still pending</td><td>Waiting for doctor / reports</td><td>Doctor OK pending</td></tr>
           <tr><td><code>waiting_referral_letter</code></td><td>Referral document (from the primary doctor or insurer) still required</td><td>Waiting for Referral Letter</td><td><em>null</em></td></tr>
-          <tr><td><code>insurance_concern</code> <span class="field-type">ipd</span></td><td>Blocked by insurance or TPA approval</td><td>Insurance Loan Pending</td><td>Insurance Approval Pending</td></tr>
-          <tr><td><code>loan_required</code> <span class="field-type">ipd</span></td><td>Needs EMI or medical financing</td><td>Insurance Loan Pending</td><td>Loan Approval Pending</td></tr>
+          <tr><td><code>insurance_concern</code> <span class="field-type">ipd</span></td><td>Blocked by insurance or TPA approval</td><td>Insurance / Loan pending</td><td>Insurance approval pending</td></tr>
+          <tr><td><code>loan_required</code> <span class="field-type">ipd</span></td><td>Needs EMI or medical financing</td><td>Insurance / Loan pending</td><td>Loan approval pending</td></tr>
           <tr><td><code>on_medications</code> <span class="field-type">ipd</span></td><td>Deferred — on a medication course first</td><td>On Medications</td><td><em>null</em></td></tr>
-          <tr><td><code>waiting_reports</code> <span class="field-type">ipd</span></td><td>Tests done, results pending</td><td>Waiting For Doctor Reports</td><td>Report Pending</td></tr>
-          <tr><td><code>medical_clearance_pending</code> <span class="field-type">ipd</span></td><td>Needs fitness or clearance from another specialist</td><td>Medical clearance pending</td><td><em>null</em></td></tr>
+          <tr><td><code>waiting_reports</code> <span class="field-type">ipd</span></td><td>Tests done, results pending</td><td>Waiting for doctor / reports</td><td>Report pending</td></tr>
+          <tr><td><code>medical_clearance_pending</code> <span class="field-type">ipd</span></td><td>Needs fitness or clearance from another specialist</td><td>Medical Clearance Pending</td><td><em>null</em></td></tr>
           <tr><td><code>follow_up</code></td><td>Patient actively asks to be contacted again, or is undecided without refusing</td><td>Follow Up</td><td><em>null</em></td></tr>
           <tr><td><code>call_dropped</code></td><td>Real conversation happened but the call ended abruptly with no conclusion</td><td>Follow Up</td><td><em>null</em></td></tr>
           <tr><td><code>no_output</code></td><td>Connected but no meaningful interaction — wrong number, voicemail, dead air, immediate hangup</td><td>No Output</td><td><em>null</em></td></tr>
-          <tr><td><code>not_connected</code></td><td>Call never connected. Auto-assigned without an LLM call</td><td>Couldn't reach</td><td>Busy</td></tr>
+          <tr><td><code>not_connected</code></td><td>Call never connected. Auto-assigned without an LLM call</td><td>Couldn't Reach</td><td>Busy</td></tr>
         </tbody>
       </table>
     </div>
@@ -1080,7 +1083,7 @@ X-Admin-Key: your-admin-secret</pre>
       </table>
     </div>
     <div class="callout callout-info">
-      <strong>Connection rate is <code>completed</code> over all terminal calls.</strong> A not-connected call still gets an analysis row — auto-classified from its status as <code>not_connected</code> (<em>Couldn't reach</em>, sub-status <em>Busy</em>) without an LLM call, since there is no transcript to read. <code>no_output</code> is the different case: connected, but nothing usable was said.
+      <strong>Connection rate is <code>completed</code> over all terminal calls.</strong> A not-connected call still gets an analysis row — auto-classified from its status as <code>not_connected</code> (<em>Couldn't Reach</em>, sub-status <em>Busy</em>) without an LLM call, since there is no transcript to read. <code>no_output</code> is the different case: connected, but nothing usable was said.
     </div>
   </section>
 
@@ -1250,7 +1253,7 @@ curl -X POST https://your-domain:8005/v1/batches/{batch_id}/schedule \
       "Escalation": {"count": 85, "pct_of_analyzed": 0.1},
       "Not Interested": {"count": 51, "pct_of_analyzed": 0.06},
       "No Output": {"count": 42, "pct_of_analyzed": 0.0494},
-      "Couldn't reach": {"count": 60, "pct_of_analyzed": 0.0706}
+      "Couldn't Reach": {"count": 60, "pct_of_analyzed": 0.0706}
     }
   },
   "not_connected_breakdown": {"busy": 45, "no_answer": 180, "failed": 55},
@@ -1270,17 +1273,17 @@ curl -X POST https://your-domain:8005/v1/batches/{batch_id}/schedule \
           <tr><td>Booking</td><td><code>scheduled_booking</code></td></tr>
           <tr><td>Visited</td><td><code>completed_visited</code></td></tr>
           <tr><td>Cost Help</td><td><code>wants_cost_estimate</code>, <code>wants_discount</code></td></tr>
-          <tr><td>Wants Second Opinion</td><td><code>wants_second_opinion</code></td></tr>
-          <tr><td>Waiting For Doctor Reports</td><td><code>waiting_doctor_confirmation</code>, <code>waiting_reports</code> <span class="field-type">(ipd)</span></td></tr>
+          <tr><td>Wants second opinion</td><td><code>wants_second_opinion</code></td></tr>
+          <tr><td>Waiting for doctor / reports</td><td><code>waiting_doctor_confirmation</code>, <code>waiting_reports</code> <span class="field-type">(ipd)</span></td></tr>
           <tr><td>Waiting for Referral Letter</td><td><code>waiting_referral_letter</code></td></tr>
-          <tr><td>Insurance Loan Pending <span class="field-type">ipd</span></td><td><code>insurance_concern</code>, <code>loan_required</code></td></tr>
+          <tr><td>Insurance / Loan pending <span class="field-type">ipd</span></td><td><code>insurance_concern</code>, <code>loan_required</code></td></tr>
           <tr><td>On Medications <span class="field-type">ipd</span></td><td><code>on_medications</code></td></tr>
-          <tr><td>Medical clearance pending <span class="field-type">ipd</span></td><td><code>medical_clearance_pending</code></td></tr>
+          <tr><td>Medical Clearance Pending <span class="field-type">ipd</span></td><td><code>medical_clearance_pending</code></td></tr>
           <tr><td>Follow Up</td><td><code>follow_up</code>, <code>call_dropped</code></td></tr>
           <tr><td>Not Interested</td><td><code>declined</code>, <code>done_elsewhere</code></td></tr>
           <tr><td>Escalation</td><td><code>escalation</code></td></tr>
           <tr><td>No Output</td><td><code>no_output</code></td></tr>
-          <tr><td>Couldn't reach</td><td><code>not_connected</code></td></tr>
+          <tr><td>Couldn't Reach</td><td><code>not_connected</code></td></tr>
         </tbody>
       </table>
     </div>
@@ -1307,7 +1310,7 @@ curl -X POST https://your-domain:8005/v1/batches/{batch_id}/schedule \
   },
   "by_disposition_status": {
     "Booking": 31, "Visited": 9, "Escalation": 8, "Not Interested": 6,
-    "No Output": 5, "Follow Up": 19, "Couldn't reach": 30
+    "No Output": 5, "Follow Up": 19, "Couldn't Reach": 30
   }
 }</pre>
   </section>
@@ -1578,7 +1581,7 @@ def verify_signature(body: bytes, secret: str, signature: str) -> bool:
         <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
         <tbody>
           <tr><td><code>call_outcome</code></td><td class="field-type">string | null</td><td>Granular outcome — see <a href="#calls">Call Outcomes and Disposition Mapping</a></td></tr>
-          <tr><td><code>disposition_status</code></td><td class="field-type">string | null</td><td>Business status derived from <code>call_outcome</code> — e.g. Booking, Visited, Cost Help, Waiting For Doctor Reports, Follow Up, Not Interested, Declined, Escalation, No Output, Couldn't reach. See the <a href="#calls">mapping table</a></td></tr>
+          <tr><td><code>disposition_status</code></td><td class="field-type">string | null</td><td>Business status derived from <code>call_outcome</code> — e.g. Booking, Visited, Cost Help, Waiting for doctor / reports, Follow Up, Not Interested, Escalation, No Output, Couldn't Reach. See the <a href="#calls">mapping table</a></td></tr>
           <tr><td><code>sub_status</code></td><td class="field-type">string | null</td><td>Sub-classification within the disposition status</td></tr>
           <tr><td><code>workflow_code</code></td><td class="field-type">string | null</td><td><code>opd</code>, <code>ipd</code>, <code>cancer_workflow</code> or <code>gynae_workflow</code> — determines the available outcome set</td></tr>
           <tr><td><code>summary</code></td><td class="field-type">string | null</td><td>Brief summary of the call</td></tr>

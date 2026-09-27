@@ -1,55 +1,37 @@
 # Disposition Alignment (turing ↔ Kalaam) — Pending
 
-**Status: pending.** turing currently ships the behaviour described under "Current" for each item. Clients match on `disposition_status` / `sub_status`, so each must end up identical to Kalaam (spelling, casing, punctuation).
+Clients match on `disposition_status` / `sub_status`, so they must be identical to Kalaam's status names (spelling, casing, `/`, apostrophe).
 
-## Waiting on Kalaam
+## Resolved (from Kalaam's status table — applied in migration 0019)
+- **Q1. Sub Status that repeats its status** → none. Wants second opinion, On Medications, Medical Clearance Pending and Waiting for Referral Letter have no sub-status.
+- **Q3. Not connected** → `Couldn't Reach / Busy` for every non-connect.
+- **Q4. Exact strings** → Kalaam values, e.g. `Insurance / Loan pending`, `Waiting for doctor / reports`, `Waiting estimate`, `Couldn't Reach` (capital R, straight apostrophe). There is no `Declined` status: a declined call is `Not Interested / Other`.
+- **D1. Free-text language** → `summary`, `reason`, `requests`, `symptoms_reported` always in English.
 
-### Q1. Sub Status for four outcomes
-The Call-Outcome guide repeats the status as the Sub Status; migration `0017_dispositions_match_kalaam` set these to NULL because Kalaam reportedly has no child status.
+## Still open
 
-| Call Outcome | Guide | Current (turing) |
-|---|---|---|
-| Want / went for second opinion | Wants Second Opinion / Wants Second Opinion | Wants Second Opinion / — |
-| On medications (IPD) | On Medications / On Medications | On Medications / — |
-| Medical clearance pending (IPD) | Medical clearance pending / Medical clearance pending | Medical clearance pending / — |
-| Waiting for referral letter | Waiting for Referral Letter / Waiting for Referral Letter | Waiting for Referral Letter / — |
-
-Needed: does Kalaam define a child status for each, and its exact value?
-
-### Q2. turing outcomes not in the guide
+### Q2. turing outcomes not in Kalaam's table
 | Outcome | Meaning | Current (turing) |
 |---|---|---|
 | `escalation` | Active/worsening symptom, adverse drug reaction, urgent callback | Escalation / — |
 | `call_dropped` | Conversation began, call cut off without a conclusion | Follow Up / — |
 | `no_output` | Connected but nothing usable (wrong number, voicemail, silence, no transcript) | No Output / — |
 
-Needed: does Kalaam accept `Escalation` and `No Output`? If not, which existing status/sub status should each map to?
-
-### Q3. "Not connected" sub status
-Guide: `Couldn't reach / Busy` for every non-connect. turing receives distinct engine statuses (`no-answer`, `busy`, `failed`, `canceled`, `stopped`, `error`, `balance-low`) and currently sends `Busy` for all.
-
-Needed: `Busy` for all, or separate sub statuses (e.g. No Answer, Switched Off)?
-
-### Q4. Exact strings
-- `Couldn't reach`: guide uses a curly apostrophe (`’`); turing sends a straight one (`'`). String comparison treats these as different.
-- Casing of `Couldn't reach` and `Medical clearance pending` (lowercase words, unlike the others).
-
-Needed: the canonical characters Kalaam uses.
-
-## Accepted for now — revisit later
+Needed: does Kalaam have `Escalation` and `No Output` statuses? If not, which existing status/sub-status should each map to?
 
 ### Q5. Task Type → workflow
-- turing workflows: `opd`, `ipd`, `cancer_workflow`, `gynae_workflow`. The guide has two tables: IPD and Other.
-- **Current:** `cancer_workflow` and `gynae_workflow` follow the "Other" table; a call with no Task Type (and no client default) uses `opd` ("Other").
+- turing workflows: `opd`, `ipd`, `cancer_workflow`, `gynae_workflow`. **Current:** cancer/gynae follow the "Other" table; a call with no Task Type (and no client default) uses `opd`.
 - **Risk:** an IPD call sent without `workflow_code=ipd` can never return insurance, loan, medications, clearance or reports outcomes.
-- To do: confirm the cancer/gynae mapping with Kalaam, and decide whether a missing Task Type should be an error, a per-client default, or stay `opd`.
+- To do: confirm cancer/gynae mapping; decide whether a missing Task Type should be an error, a per-client default, or stay `opd`.
 
-## Decided
-- **D1. Free-text language:** `summary`, `reason`, `requests` and `symptoms_reported` are always written in English, whatever language the call is in (prompt + output schema updated).
+### Q6. Which outcomes are offered outside IPD
+Kalaam applies every outcome to every task type (it only fails if that task type lacks the status). turing currently offers these **only for IPD**: Insurance Related Concern, Loan Options Required, On Medications, Medical Clearance Pending, **Waiting for Reports**.
+- **Waiting for Reports** is missing from the guide's Other Tasks table but valid in Kalaam for every task type. Decide: offer it for OPD/other workflows too, or keep it IPD-only on purpose.
+- The other four: keeping them IPD-only matches the guide's staff advice.
 
-## When Q1–Q4 are answered
-1. Set exact strings in `app/services/dispositions.py`.
-2. Add a new data migration (`0019`) to re-map existing rows — never edit applied migrations.
-3. Change the analysis prompt only if Q2 removes or merges outcomes.
+## When an open item is decided
+1. Set exact strings in `app/services/dispositions.py` (and outcome membership in `app/services/workflows.py` for Q6).
+2. Add a new data migration to re-map existing rows — never edit applied migrations.
+3. The prompt's disposition reference is generated from the mapping, so it updates itself; change outcome definitions only if Q2 removes or merges outcomes.
 4. Update `docs/integration-guide.html` and `frontend/lib/outcomes.ts`.
 5. Re-verify on a real DB: backfill, a fresh classification, and the webhook payload.
