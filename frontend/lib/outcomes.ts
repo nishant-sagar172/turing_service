@@ -3,69 +3,65 @@
  *
  * The backend classifies each call into one granular `call_outcome`, then maps
  * it to a `disposition_status` + `sub_status`. Disposition status is the
- * business rollup (six values) and is what operator views lead with; the
+ * business rollup and is what operator views lead with; the
  * granular outcome is the detail underneath it.
  */
 
-/** Canonical display order — most actionable first. Matches the client
- *  Call-Outcome guide's Disposition Status values. */
+/** Canonical display order — most actionable first. Exact Kalaam Disposition
+ *  Status strings; clients match on them, so do not reword. */
 export const DISPOSITION_ORDER = [
   "Booking",
   "Visited",
   "Cost Help",
-  "Insurance Loan Pending",
-  "Wants Second Opinion",
+  "Insurance / Loan pending",
+  "Wants second opinion",
   "On Medications",
-  "Waiting For Doctor Reports",
-  "Medical clearance pending",
+  "Waiting for doctor / reports",
+  "Medical Clearance Pending",
   "Waiting for Referral Letter",
   "Follow Up",
   "Not Interested",
-  "Declined",
   "Escalation",
-  "No Output",
-  "Couldn't reach",
+  "Couldn't Reach",
 ] as const;
 
 const DISPOSITION_COLORS: Record<string, string> = {
   Booking: "var(--green)",
   Visited: "var(--green)",
   "Cost Help": "var(--accent)",
-  "Insurance Loan Pending": "var(--accent)",
-  "Wants Second Opinion": "var(--accent)",
+  "Insurance / Loan pending": "var(--accent)",
+  "Wants second opinion": "var(--accent)",
   "On Medications": "var(--accent)",
-  "Waiting For Doctor Reports": "var(--accent)",
-  "Medical clearance pending": "var(--accent)",
+  "Waiting for doctor / reports": "var(--accent)",
+  "Medical Clearance Pending": "var(--accent)",
   "Waiting for Referral Letter": "var(--accent)",
   "Follow Up": "var(--accent)",
   "Not Interested": "var(--red)",
-  Declined: "var(--red)",
   Escalation: "var(--amber)",
-  "No Output": "var(--muted)",
-  "Couldn't reach": "var(--muted)",
+  "Couldn't Reach": "var(--muted)",
 };
 
-// Call Outcome display names, matching the client Call-Outcome guide.
+// Call Outcome display names (Title Case, per the corrected guide).
 const OUTCOME_LABELS: Record<string, string> = {
   escalation: "Escalation",
   completed_visited: "Completed",
   scheduled_booking: "Scheduled",
-  done_elsewhere: "Done at other hospital",
+  done_elsewhere: "Done at Other Hospital",
   declined: "Declined",
   wants_cost_estimate: "Want Cost Estimate",
   wants_discount: "Want Discount / Cost Concern",
-  wants_second_opinion: "Want / went for second opinion",
-  waiting_doctor_confirmation: "Waiting for doctor confirmation",
+  wants_second_opinion: "Want / Went for Second Opinion",
+  waiting_doctor_confirmation: "Waiting for Doctor Confirmation",
   insurance_concern: "Insurance Related Concern",
   loan_required: "Loan Options Required",
-  on_medications: "On medications",
-  waiting_reports: "Waiting for reports",
-  medical_clearance_pending: "Medical clearance pending",
-  waiting_referral_letter: "Waiting for referral letter",
+  on_medications: "On Medications",
+  waiting_reports: "Waiting for Reports",
+  medical_clearance_pending: "Medical Clearance Pending",
+  waiting_referral_letter: "Waiting for Referral Letter",
   follow_up: "Follow Up",
-  call_dropped: "Call dropped",
-  no_output: "No output",
-  not_connected: "Not connected",
+  call_dropped: "Call Dropped",
+  no_output: "No Output",
+  not_connected: "Not Connected",
 };
 
 /** Each granular outcome takes its disposition family's colour. */

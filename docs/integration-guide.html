@@ -762,10 +762,10 @@ X-Admin-Key: your-admin-secret</pre>
             <tr><td><code>visible_fields</code></td><td class="field-type">object | null</td><td>Fields visible in the client portal</td></tr>
             <tr><td><code>settings</code></td><td class="field-type">object | null</td><td>Custom settings JSON</td></tr>
             <tr><td><code>analysis_llm_provider</code></td><td class="field-type">string | null</td><td>LLM provider for call analysis (<code>openai</code>, <code>anthropic</code>). Defaults to <code>openai</code></td></tr>
-            <tr><td><code>analysis_llm_model</code></td><td class="field-type">string | null</td><td>Model override. Defaults to <code>gpt-5.6-mini</code> (openai) or <code>claude-haiku-4-5-20251001</code> (anthropic)</td></tr>
+            <tr><td><code>analysis_llm_model</code></td><td class="field-type">string | null</td><td>Model override. Defaults to <code>gpt-5.6-luna</code> (openai) or <code>claude-haiku-4-5-20251001</code> (anthropic)</td></tr>
             <tr><td><code>analysis_prompt_hint</code></td><td class="field-type">string | null</td><td>Custom prompt hint appended to analysis</td></tr>
             <tr><td><code>analysis_llm_api_key</code></td><td class="field-type">string | null</td><td>Write-only. Client's own LLM API key, encrypted at rest. Requires <code>ENCRYPTION_KEY</code> on the server — returns 503 if unset. Reads expose only <code>analysis_llm_api_key_set</code> (boolean)</td></tr>
-            <tr><td><code>default_workflow_code</code></td><td class="field-type">string | null</td><td>Fallback workflow for batches that do not set one: <code>opd</code>, <code>ipd</code>, <code>cancer_workflow</code> or <code>gynae_workflow</code></td></tr>
+            <tr><td><code>default_workflow_code</code></td><td class="field-type">string | null</td><td>Fallback workflow for calls and batches that do not set one: <code>opd</code>, <code>ipd</code>, <code>cancer_workflow</code> or <code>gynae_workflow</code></td></tr>
           </tbody>
         </table>
       </div>
@@ -959,8 +959,8 @@ X-Admin-Key: your-admin-secret</pre>
       "created_at": "2026-01-20T14:30:00Z",
       "analysis": {
         "call_outcome": "scheduled_booking",
-        "disposition_status": "Converted",
-        "sub_status": "Booking Scheduled",
+        "disposition_status": "Booking",
+        "sub_status": null,
         "workflow_code": "opd",
         "summary": "Patient confirmed appointment for Jan 25",
         "reason": "Patient explicitly agreed to the proposed 25 Jan slot.",
@@ -968,7 +968,7 @@ X-Admin-Key: your-admin-secret</pre>
         "urgency": "low",
         "confidence": 0.92,
         "symptoms_reported": [],
-        "model_used": "openai/gpt-5.6-mini",
+        "model_used": "openai/gpt-5.6-luna",
         "analyzed_at": "2026-01-20T14:31:12Z"
       }
     }
@@ -998,25 +998,28 @@ X-Admin-Key: your-admin-secret</pre>
           <tr><td><code>urgency</code></td><td class="field-type">string | null</td><td><code>low</code>, <code>medium</code>, or <code>high</code></td></tr>
           <tr><td><code>confidence</code></td><td class="field-type">float | null</td><td>Classification confidence, 0.0–1.0</td></tr>
           <tr><td><code>symptoms_reported</code></td><td class="field-type">array[string]</td><td>Any symptoms the patient mentioned, in any outcome</td></tr>
-          <tr><td><code>model_used</code></td><td class="field-type">string | null</td><td>Provider and model tag, e.g. <code>openai/gpt-5.6-mini</code></td></tr>
+          <tr><td><code>model_used</code></td><td class="field-type">string | null</td><td>Provider and model tag, e.g. <code>openai/gpt-5.6-luna</code></td></tr>
           <tr><td><code>analyzed_at</code></td><td class="field-type">datetime | null</td><td>When the analysis completed</td></tr>
         </tbody>
       </table>
     </div>
 
     <h4>Workflows</h4>
-    <p><code>workflow_code</code> is <strong>always optional</strong>. A batch that omits it falls back to the client's <code>default_workflow_code</code>, and then to <code>opd</code> — campaigns run and classify normally either way. It only decides which call outcomes the classifier may assign.</p>
-    <p>Codes mirror Kalaam's <code>workflows.workflow_code</code>. Set it per batch (<code>workflow_code</code> on <code>POST /v1/batches</code> or <code>POST /v1/batches/upload</code>) or per client (<code>default_workflow_code</code> in client config). Single calls carry no batch, so the client default is their only source.</p>
+    <p><code>workflow_code</code> is <strong>always optional</strong>. Turing resolves it per call in this order: the call&rsquo;s own <code>workflow_code</code> (<code>POST /v1/calls</code>) &rarr; its batch&rsquo;s <code>workflow_code</code> (<code>POST /v1/batches</code> or <code>/v1/batches/upload</code>) &rarr; the client&rsquo;s <code>default_workflow_code</code> &rarr; <code>opd</code>. It decides which call outcomes the classifier may assign, and which Call-Outcome guide table applies.</p>
+    <p>Codes mirror Kalaam&rsquo;s <code>workflows.workflow_code</code>. Kalaam sets the patient&rsquo;s status from the returned <code>call_outcome</code> + <code>workflow_code</code> using its own status codes.</p>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>workflow_code</th><th>Description</th></tr></thead>
+        <thead><tr><th>workflow_code</th><th>Guide table</th><th>Outcomes the classifier may assign</th><th>Kalaam sends it for</th></tr></thead>
         <tbody>
-          <tr><td><code>opd</code></td><td>Out-patient follow-ups, appointment reminders, check-ins. Used when nothing is set</td></tr>
-          <tr><td><code>ipd</code></td><td>In-patient admission coordination. Unlocks finance and clearance outcomes (insurance, loan, medications, reports, clearance, referral letter)</td></tr>
-          <tr><td><code>cancer_workflow</code></td><td>Oncology pathways. Currently shares the common outcome set — registered so campaigns can be tagged and reported on</td></tr>
-          <tr><td><code>gynae_workflow</code></td><td>Gynaecology pathways. Currently shares the common outcome set</td></tr>
+          <tr><td><code>opd</code></td><td>Other Tasks</td><td>The Other Tasks outcomes</td><td>OPD patients (any task except IP admission); IPD patients on non-admission tasks (follow-up, lab test, medication, procedure, radiology test, referral); an unrecognised workflow. Also Turing&rsquo;s default when nothing is set</td></tr>
+          <tr><td><code>ipd</code></td><td>IPD Admission Tasks</td><td>The Other Tasks outcomes <strong>plus</strong> insurance, loan, on medications, waiting for reports, medical clearance</td><td>An IP-admission task in any workflow (OPD, IPD or gynae)</td></tr>
+          <tr><td><code>gynae_workflow</code></td><td>Other Tasks</td><td>The Other Tasks outcomes</td><td>Gynae patients on non-admission tasks</td></tr>
+          <tr><td><code>cancer_workflow</code></td><td>Other Tasks</td><td>The Other Tasks outcomes</td><td>Cancer patients</td></tr>
         </tbody>
       </table>
+    </div>
+    <div class="callout callout-info">
+      <strong>Only <code>done_elsewhere</code> differs by workflow:</strong> <em>Not Interested / Admitted Elsewhere</em> for <code>ipd</code>, <em>Not Interested / Done Elsewhere</em> for the rest. The guide is the specification; if a hospital&rsquo;s Kalaam workflow does not have a mapped status set up, Kalaam leaves the status unchanged and logs <code>skipped_invalid_status</code>. Kalaam&rsquo;s auto-call path sends the patient&rsquo;s workflow as-is rather than applying the task rule above.
     </div>
 
     <p>The list is served from the API so it stays in step with the backend:</p>
@@ -1030,30 +1033,33 @@ X-Admin-Key: your-admin-secret</pre>
     </div>
 
     <h4>Call Outcomes and Disposition Mapping</h4>
+    <div class="callout callout-warning">
+      <strong>Match these strings exactly.</strong> <code>disposition_status</code> and <code>sub_status</code> are Kalaam's status names, character for character (casing, <code>/</code>, straight apostrophe in <em>Couldn't Reach</em>). There is no <em>Declined</em> status: a declined call is <em>Not Interested / Other</em>.
+    </div>
     <p>The LLM classifies the call into one <code>call_outcome</code>. Turing then deterministically maps that to a <code>disposition_status</code> and <code>sub_status</code>.</p>
     <div class="table-wrap">
       <table>
         <thead><tr><th>call_outcome</th><th>Description</th><th>disposition_status</th><th>sub_status</th></tr></thead>
         <tbody>
           <tr><td><code>escalation</code></td><td>Active or worsening symptom, adverse drug reaction, or urgent callback request. Highest priority — overrides every other outcome</td><td>Escalation</td><td><em>null</em></td></tr>
-          <tr><td><code>completed_visited</code></td><td>Visit or procedure already completed at this hospital</td><td>Converted</td><td>Visited</td></tr>
-          <tr><td><code>scheduled_booking</code></td><td>Specific future date confirmed by the patient</td><td>Converted</td><td>Booking Scheduled</td></tr>
-          <tr><td><code>done_elsewhere</code></td><td>Patient treated at a different hospital</td><td>Not Interested</td><td>Admitted Elsewhere <span class="field-type">(ipd)</span><br>Done Elsewhere <span class="field-type">(opd, cancer)</span></td></tr>
-          <tr><td><code>declined</code></td><td>Explicit, unambiguous refusal to proceed</td><td>Not Interested</td><td>Declined</td></tr>
-          <tr><td><code>wants_cost_estimate</code></td><td>Asking for cost or package price before deciding</td><td>Follow Up</td><td>Cost Estimate Requested</td></tr>
-          <tr><td><code>wants_discount</code></td><td>Has the estimate, asking for a discount</td><td>Follow Up</td><td>Discount Requested</td></tr>
-          <tr><td><code>wants_second_opinion</code></td><td>Wants another doctor's opinion first</td><td>Follow Up</td><td>Second Opinion</td></tr>
-          <tr><td><code>waiting_doctor_confirmation</code></td><td>Doctor's final go-ahead still pending</td><td>Follow Up</td><td>Doctor Confirmation Pending</td></tr>
-          <tr><td><code>insurance_concern</code> <span class="field-type">ipd</span></td><td>Blocked by insurance or TPA approval</td><td>Follow Up</td><td>Insurance/TPA Pending</td></tr>
-          <tr><td><code>loan_required</code> <span class="field-type">ipd</span></td><td>Needs EMI or medical financing</td><td>Follow Up</td><td>Loan/EMI Required</td></tr>
-          <tr><td><code>on_medications</code> <span class="field-type">ipd</span></td><td>Deferred — on a medication course first</td><td>Follow Up</td><td>On Medications</td></tr>
-          <tr><td><code>waiting_reports</code> <span class="field-type">ipd</span></td><td>Tests done, results pending</td><td>Follow Up</td><td>Reports Pending</td></tr>
-          <tr><td><code>medical_clearance_pending</code> <span class="field-type">ipd</span></td><td>Needs fitness or clearance from another specialist</td><td>Follow Up</td><td>Medical Clearance Pending</td></tr>
-          <tr><td><code>waiting_referral_letter</code> <span class="field-type">ipd</span></td><td>Referral document from insurer still required</td><td>Follow Up</td><td>Referral Letter Pending</td></tr>
-          <tr><td><code>follow_up</code></td><td>Patient actively asks to be contacted again, or is undecided without refusing</td><td>Follow Up</td><td>General Follow Up</td></tr>
-          <tr><td><code>call_dropped</code></td><td>Real conversation happened but the call ended abruptly with no conclusion</td><td>Follow Up</td><td>Call Dropped</td></tr>
-          <tr><td><code>no_output</code></td><td>Connected but no meaningful interaction — wrong number, voicemail, dead air, immediate hangup</td><td>No Output</td><td><em>null</em></td></tr>
-          <tr><td><code>not_connected</code></td><td>Call never connected. Auto-assigned without an LLM call</td><td>Couldn't Reach</td><td><em>null</em></td></tr>
+          <tr><td><code>completed_visited</code></td><td>Visit or procedure already completed at this hospital</td><td>Visited</td><td><em>null</em></td></tr>
+          <tr><td><code>scheduled_booking</code></td><td>Specific future date confirmed by the patient</td><td>Booking</td><td><em>null</em></td></tr>
+          <tr><td><code>done_elsewhere</code></td><td>Patient treated at a different hospital</td><td>Not Interested</td><td>Admitted Elsewhere <span class="field-type">(ipd)</span><br>Done Elsewhere <span class="field-type">(opd, cancer, gynae)</span></td></tr>
+          <tr><td><code>declined</code></td><td>Explicit, unambiguous refusal to proceed</td><td>Not Interested</td><td>Other</td></tr>
+          <tr><td><code>wants_cost_estimate</code></td><td>Asking for cost or package price before deciding</td><td>Cost Help</td><td>Waiting estimate</td></tr>
+          <tr><td><code>wants_discount</code></td><td>Has the estimate, asking for a discount</td><td>Cost Help</td><td>Discount asked</td></tr>
+          <tr><td><code>wants_second_opinion</code></td><td>Wants another doctor's opinion first</td><td>Wants second opinion</td><td><em>null</em></td></tr>
+          <tr><td><code>waiting_doctor_confirmation</code></td><td>Doctor's final go-ahead still pending</td><td>Waiting for doctor / reports</td><td>Doctor OK pending</td></tr>
+          <tr><td><code>waiting_referral_letter</code></td><td>Referral document (from the primary doctor or insurer) still required</td><td>Waiting for Referral Letter</td><td><em>null</em></td></tr>
+          <tr><td><code>insurance_concern</code> <span class="field-type">ipd</span></td><td>Blocked by insurance or TPA approval</td><td>Insurance / Loan pending</td><td>Insurance approval pending</td></tr>
+          <tr><td><code>loan_required</code> <span class="field-type">ipd</span></td><td>Needs EMI or medical financing</td><td>Insurance / Loan pending</td><td>Loan approval pending</td></tr>
+          <tr><td><code>on_medications</code> <span class="field-type">ipd</span></td><td>Deferred — on a medication course first</td><td>On Medications</td><td><em>null</em></td></tr>
+          <tr><td><code>waiting_reports</code> <span class="field-type">ipd</span></td><td>Tests done, results pending</td><td>Waiting for doctor / reports</td><td>Report pending</td></tr>
+          <tr><td><code>medical_clearance_pending</code> <span class="field-type">ipd</span></td><td>Needs fitness or clearance from another specialist</td><td>Medical Clearance Pending</td><td><em>null</em></td></tr>
+          <tr><td><code>follow_up</code></td><td>Patient actively asks to be contacted again, or is undecided without refusing</td><td>Follow Up</td><td><em>null</em></td></tr>
+          <tr><td><code>call_dropped</code></td><td>Real conversation happened but the call ended abruptly with no conclusion</td><td>Follow Up</td><td><em>null</em></td></tr>
+          <tr><td><code>no_output</code></td><td>Connected but no meaningful interaction — wrong number, voicemail, dead air, immediate hangup</td><td>Follow Up</td><td><em>null</em></td></tr>
+          <tr><td><code>not_connected</code></td><td>Call never connected. Auto-assigned without an LLM call</td><td>Couldn't Reach</td><td>Busy</td></tr>
         </tbody>
       </table>
     </div>
@@ -1080,7 +1086,7 @@ X-Admin-Key: your-admin-secret</pre>
       </table>
     </div>
     <div class="callout callout-info">
-      <strong>Connection rate is <code>completed</code> over all terminal calls.</strong> A not-connected call still gets an analysis row — auto-classified from its status as <code>not_connected</code> (<em>Couldn't Reach</em>) without an LLM call, since there is no transcript to read. <code>no_output</code> is the different case: connected, but nothing usable was said.
+      <strong>Connection rate is <code>completed</code> over all terminal calls.</strong> A not-connected call still gets an analysis row — auto-classified from its status as <code>not_connected</code> (<em>Couldn't Reach</em>, sub-status <em>Busy</em>) without an LLM call, since there is no transcript to read. <code>no_output</code> is the different case: connected, but nothing usable was said.
     </div>
   </section>
 
@@ -1243,12 +1249,13 @@ curl -X POST https://your-domain:8005/v1/batches/{batch_id}/schedule \
       "wants_cost_estimate": {"count": 80, "pct_of_analyzed": 0.0941}
     },
     "by_disposition_status": {
-      "Converted": {"count": 340, "pct_of_analyzed": 0.4},
-      "Couldn't Reach": {"count": 60, "pct_of_analyzed": 0.0706},
+      "Booking": {"count": 244, "pct_of_analyzed": 0.287},
+      "Visited": {"count": 96, "pct_of_analyzed": 0.113},
+      "Cost Help": {"count": 80, "pct_of_analyzed": 0.0941},
+      "Follow Up": {"count": 234, "pct_of_analyzed": 0.2754},
       "Escalation": {"count": 85, "pct_of_analyzed": 0.1},
-      "Follow Up": {"count": 272, "pct_of_analyzed": 0.32},
-      "No Output": {"count": 42, "pct_of_analyzed": 0.0494},
-      "Not Interested": {"count": 51, "pct_of_analyzed": 0.06}
+      "Not Interested": {"count": 51, "pct_of_analyzed": 0.06},
+      "Couldn't Reach": {"count": 60, "pct_of_analyzed": 0.0706}
     }
   },
   "not_connected_breakdown": {"busy": 45, "no_answer": 180, "failed": 55},
@@ -1265,11 +1272,18 @@ curl -X POST https://your-domain:8005/v1/batches/{batch_id}/schedule \
       <table>
         <thead><tr><th>disposition_status</th><th>Outcomes it covers</th></tr></thead>
         <tbody>
-          <tr><td>Converted</td><td><code>scheduled_booking</code>, <code>completed_visited</code></td></tr>
-          <tr><td>Follow Up</td><td><code>follow_up</code>, <code>call_dropped</code>, <code>wants_cost_estimate</code>, <code>wants_discount</code>, <code>wants_second_opinion</code>, <code>waiting_doctor_confirmation</code>, and the IPD finance/clearance outcomes</td></tr>
+          <tr><td>Booking</td><td><code>scheduled_booking</code></td></tr>
+          <tr><td>Visited</td><td><code>completed_visited</code></td></tr>
+          <tr><td>Cost Help</td><td><code>wants_cost_estimate</code>, <code>wants_discount</code></td></tr>
+          <tr><td>Wants second opinion</td><td><code>wants_second_opinion</code></td></tr>
+          <tr><td>Waiting for doctor / reports</td><td><code>waiting_doctor_confirmation</code>, <code>waiting_reports</code> <span class="field-type">(ipd)</span></td></tr>
+          <tr><td>Waiting for Referral Letter</td><td><code>waiting_referral_letter</code></td></tr>
+          <tr><td>Insurance / Loan pending <span class="field-type">ipd</span></td><td><code>insurance_concern</code>, <code>loan_required</code></td></tr>
+          <tr><td>On Medications <span class="field-type">ipd</span></td><td><code>on_medications</code></td></tr>
+          <tr><td>Medical Clearance Pending <span class="field-type">ipd</span></td><td><code>medical_clearance_pending</code></td></tr>
+          <tr><td>Follow Up</td><td><code>follow_up</code>, <code>call_dropped</code>, <code>no_output</code></td></tr>
           <tr><td>Not Interested</td><td><code>declined</code>, <code>done_elsewhere</code></td></tr>
           <tr><td>Escalation</td><td><code>escalation</code></td></tr>
-          <tr><td>No Output</td><td><code>no_output</code></td></tr>
           <tr><td>Couldn't Reach</td><td><code>not_connected</code></td></tr>
         </tbody>
       </table>
@@ -1296,8 +1310,8 @@ curl -X POST https://your-domain:8005/v1/batches/{batch_id}/schedule \
     "not_connected": 30
   },
   "by_disposition_status": {
-    "Converted": 40, "Escalation": 8, "Not Interested": 6,
-    "No Output": 5, "Follow Up": 19, "Couldn't Reach": 30
+    "Booking": 31, "Visited": 9, "Escalation": 8, "Not Interested": 6,
+    "Follow Up": 24, "Couldn't Reach": 30
   }
 }</pre>
   </section>
@@ -1459,6 +1473,7 @@ curl -X POST https://your-domain:8005/v1/sql-agent/query \
 
     <h3>Outbound — Call Outcome Notifications</h3>
     <p>When a client configures a <code>webhook_url</code> in their client config, Turing sends a POST request as each call reaches a terminal status. The payload is the <strong>full</strong> record — call metadata, transcript, extracted data, and the complete <code>analysis</code> block — so you can act on the webhook alone without calling back.</p>
+    <p><code>patient_uhid</code> and <code>client_ref</code> are echoed back exactly as you supplied them — via <code>user_data</code> on a single call, or a recipient column on a batch (keys <code>patient_uhid</code> / <code>client_ref</code>). Use <code>client_ref</code> (your own row id) to match an outcome to your record without relying on the phone number, which two recipients can share.</p>
 
     <h4>Webhook Payload</h4>
 <pre>POST https://your-webhook-endpoint.com/callback
@@ -1470,6 +1485,7 @@ X-Webhook-Signature: sha256=abc123...
   "turing_batch_id": "vb_xyz789",
   "voice_call_id": "exec_abc123",
   "patient_uhid": "UHID-44821",
+  "client_ref": "row-5821",
   "contact_number": "+919876543210",
   "from_number": "+911140848000",
   "agent_id": "agent-001",
@@ -1484,8 +1500,8 @@ X-Webhook-Signature: sha256=abc123...
   "extracted_data": { "appointment_date": "2026-09-22" },
   "analysis": {
     "call_outcome": "scheduled_booking",
-    "disposition_status": "Converted",
-    "sub_status": "Booking Scheduled",
+    "disposition_status": "Booking",
+    "sub_status": null,
     "workflow_code": "opd",
     "summary": "Patient confirmed an appointment for Monday.",
     "reason": "Patient explicitly agreed to the proposed 22 September slot.",
@@ -1493,7 +1509,7 @@ X-Webhook-Signature: sha256=abc123...
     "urgency": "low",
     "confidence": 0.92,
     "symptoms_reported": [],
-    "model_used": "openai/gpt-5.6-mini",
+    "model_used": "openai/gpt-5.6-luna",
     "analyzed_at": "2026-09-18T09:15:01+00:00"
   }
 }</pre>
@@ -1566,7 +1582,7 @@ def verify_signature(body: bytes, secret: str, signature: str) -> bool:
         <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
         <tbody>
           <tr><td><code>call_outcome</code></td><td class="field-type">string | null</td><td>Granular outcome — see <a href="#calls">Call Outcomes and Disposition Mapping</a></td></tr>
-          <tr><td><code>disposition_status</code></td><td class="field-type">string | null</td><td>Business status: Converted, Follow Up, Not Interested, Escalation, No Output, Couldn't Reach</td></tr>
+          <tr><td><code>disposition_status</code></td><td class="field-type">string | null</td><td>Business status derived from <code>call_outcome</code> — e.g. Booking, Visited, Cost Help, Waiting for doctor / reports, Follow Up, Not Interested, Escalation, Couldn't Reach. See the <a href="#calls">mapping table</a></td></tr>
           <tr><td><code>sub_status</code></td><td class="field-type">string | null</td><td>Sub-classification within the disposition status</td></tr>
           <tr><td><code>workflow_code</code></td><td class="field-type">string | null</td><td><code>opd</code>, <code>ipd</code>, <code>cancer_workflow</code> or <code>gynae_workflow</code> — determines the available outcome set</td></tr>
           <tr><td><code>summary</code></td><td class="field-type">string | null</td><td>Brief summary of the call</td></tr>
@@ -2006,7 +2022,7 @@ def verify_signature(body: bytes, secret: str, signature: str) -> bool:
         <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
         <tbody>
           <tr><td><code>LLM_PROVIDER</code></td><td><code>openai</code></td><td>Default LLM provider for call analysis (<code>openai</code> or <code>anthropic</code>)</td></tr>
-          <tr><td><code>LLM_MODEL</code></td><td><code>null</code></td><td>Model override. Falls back to <code>gpt-5.6-mini</code> (openai) or <code>claude-haiku-4-5-20251001</code> (anthropic)</td></tr>
+          <tr><td><code>LLM_MODEL</code></td><td><code>null</code></td><td>Model override. Falls back to <code>gpt-5.6-luna</code> (openai) or <code>claude-haiku-4-5-20251001</code> (anthropic)</td></tr>
           <tr><td><code>ANTHROPIC_API_KEY</code></td><td><code>null</code></td><td>Anthropic API key</td></tr>
           <tr><td><code>OPENAI_API_KEY</code></td><td><code>null</code></td><td>OpenAI API key</td></tr>
           <tr><td><code>GOOGLE_API_KEY</code></td><td><code>null</code></td><td>Google API key (for SQL Agent)</td></tr>

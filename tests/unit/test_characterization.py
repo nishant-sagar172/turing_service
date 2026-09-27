@@ -21,6 +21,7 @@ from app.core.call_status import normalize_batch_status
 from app.core.variables import load_variable_overrides
 from app.db.models import CallAnalysis
 from app.routers.calls import _analysis_result
+from app.schemas.calls import MakeCallRequest
 from app.routers.webhooks import BATCH_TERMINAL_STATUSES
 from app.services import store
 from app.services.analytics import CONNECTED, NOT_CONNECTED, TERMINAL
@@ -323,3 +324,27 @@ def test_container_healthchecks_probe_readiness_not_liveness() -> None:
         assert '8005/health"' not in text and "8005/health " not in text, (
             f"{path} still probes bare /health"
         )
+
+
+def test_custom_validator_error_is_a_422_not_a_500() -> None:
+    """A field_validator that raises ValueError (the E.164 phone check) puts the
+    exception object in the error ctx; the handler must still serialize it."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.errors import register_error_handlers
+
+    app = FastAPI()
+    register_error_handlers(app)
+
+    @app.post("/calls")
+    async def place(body: MakeCallRequest) -> dict[str, str]:
+        return {"ok": body.recipient_phone_number}
+
+    response = TestClient(app, raise_server_exceptions=False).post(
+        "/calls", json={"agent_id": "a", "recipient_phone_number": "9876543210"}
+    )
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"] == "validation_error"
+    assert "E.164" in json.dumps(body["detail"])

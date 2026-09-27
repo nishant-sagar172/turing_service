@@ -11,6 +11,7 @@ import logging
 from typing import Any, cast
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -94,7 +95,9 @@ def register_error_handlers(app: FastAPI) -> None:
             status_code=422,
             error="validation_error",
             message="Request validation failed.",
-            detail=exc.errors(),
+            # Custom validators put the raised exception in ctx; stringify it or the
+            # response itself fails to serialize and a 422 becomes a 500.
+            detail=jsonable_encoder(exc.errors(), custom_encoder={Exception: str}),
         )
 
     @app.exception_handler(Exception)

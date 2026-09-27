@@ -296,8 +296,7 @@ function ConfigTab({ clientId }: { clientId: string }) {
             </p>
           )}
           <p className="hint">
-            Used by batches that do not set their own type, and by single calls —
-            which have no batch, so this is their only source. Optional.
+            Used when a call or batch does not set its own workflow. Optional.
           </p>
         </div>
         <div>
