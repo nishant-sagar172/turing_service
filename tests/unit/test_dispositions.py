@@ -1,4 +1,4 @@
-"""Disposition mapping vs the Kalaam "Call Outcome & Disposition Guide".
+"""Disposition mapping vs Kalaam's status table (corrected Call-Outcome guide).
 
 `resolve_disposition` is what turns the classifier's call_outcome into the
 (status, sub_status) pair Kalaam stores, so these tests pin it to the guide.
@@ -31,19 +31,22 @@ IPD_GUIDE: dict[str, tuple[str, str | None]] = {
     "completed_visited": ("Visited", None),
     "scheduled_booking": ("Booking", None),
     "done_elsewhere": ("Not Interested", "Admitted Elsewhere"),
-    "wants_cost_estimate": ("Cost Help", "Waiting Estimate"),
-    "wants_discount": ("Cost Help", "Discount Asked"),
-    "insurance_concern": ("Insurance Loan Pending", "Insurance Approval Pending"),
-    "loan_required": ("Insurance Loan Pending", "Loan Approval Pending"),
-    "wants_second_opinion": ("Wants Second Opinion", None),
+    "wants_cost_estimate": ("Cost Help", "Waiting estimate"),
+    "wants_discount": ("Cost Help", "Discount asked"),
+    "insurance_concern": ("Insurance / Loan pending", "Insurance approval pending"),
+    "loan_required": ("Insurance / Loan pending", "Loan approval pending"),
+    "wants_second_opinion": ("Wants second opinion", None),
     "on_medications": ("On Medications", None),
-    "waiting_doctor_confirmation": ("Waiting For Doctor Reports", "Doctor OK Pending"),
-    "waiting_reports": ("Waiting For Doctor Reports", "Report Pending"),
-    "medical_clearance_pending": ("Medical clearance pending", None),
+    "waiting_doctor_confirmation": (
+        "Waiting for doctor / reports",
+        "Doctor OK pending",
+    ),
+    "waiting_reports": ("Waiting for doctor / reports", "Report pending"),
+    "medical_clearance_pending": ("Medical Clearance Pending", None),
     "waiting_referral_letter": ("Waiting for Referral Letter", None),
     "follow_up": ("Follow Up", None),
-    "declined": ("Declined", "Other"),
-    "not_connected": ("Couldn't reach", "Busy"),
+    "declined": ("Not Interested", "Other"),
+    "not_connected": ("Couldn't Reach", "Busy"),
 }
 
 # The guide's "Other Tasks" table drops the admission-only outcomes and says
@@ -176,3 +179,29 @@ def test_legacy_outcome_filter_values() -> None:
     follow_up_values, negate = legacy_outcome_filter_values("follow_up")
     assert negate is True
     assert "scheduled_booking" in follow_up_values
+
+
+@pytest.mark.parametrize("workflow_code", ["ipd", *OTHER_WORKFLOWS])
+def test_prompt_reference_matches_the_live_mapping(workflow_code: str) -> None:
+    from app.services.analysis import _build_system_prompt
+
+    prompt = _build_system_prompt(workflow_code)
+    for outcome in outcomes_for_workflow(workflow_code):
+        disposition = resolve_disposition(workflow_code, outcome)
+        label = f'status "{disposition.status}"'
+        if disposition.sub_status:
+            label += f', sub-status "{disposition.sub_status}"'
+        assert f"- {outcome} → {label}\n" in prompt + "\n"
+
+
+def test_migration_0019_targets_equal_the_live_mapping() -> None:
+    import importlib.util
+    from pathlib import Path
+
+    path = Path("alembic/versions/0019_kalaam_dispositions.py")
+    spec = importlib.util.spec_from_file_location("m0019", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for outcome, _old, new in module._CHANGES:
+        assert tuple(resolve_disposition("ipd", outcome)) == new

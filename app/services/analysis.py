@@ -283,6 +283,23 @@ def _build_priority_order(workflow_code: str | None) -> str:
     )
 
 
+def _build_disposition_reference(workflow_code: str | None) -> str:
+    # Rendered from the live mapping so the prompt can never drift from what turing stores.
+    code = resolve_workflow(workflow_code).code
+    valid = outcomes_for_workflow(workflow_code)
+    lines = []
+    for outcome in (o for o in _PRIORITY_ORDER if o in valid):
+        disposition = resolve_disposition(code, outcome)
+        label = f'status "{disposition.status}"'
+        if disposition.sub_status:
+            label += f', sub-status "{disposition.sub_status}"'
+        lines.append(f"- {outcome} → {label}")
+    return (
+        "\n\nDISPOSITION REFERENCE (context only — return call_outcome; turing "
+        "assigns the Disposition Status / Sub Status):\n" + "\n".join(lines)
+    )
+
+
 def _build_system_prompt(
     workflow_code: str | None, prompt_hint: str | None = None
 ) -> str:
@@ -294,6 +311,7 @@ def _build_system_prompt(
         parts.append(section)
     parts.append(_OUTCOME_DEFS_TAIL)
     parts.append(_build_priority_order(workflow_code))
+    parts.append(_build_disposition_reference(workflow_code))
     parts.append(_RULES)
     parts.append(_FEW_SHOT)
     prompt = "".join(parts)

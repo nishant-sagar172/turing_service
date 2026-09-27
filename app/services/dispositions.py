@@ -28,42 +28,43 @@ DISPOSITION_MAP: dict[tuple[str, str], DispositionResult] = {
     (_ANY_WORKFLOW, "done_elsewhere"): DispositionResult(
         "Not Interested", "Done Elsewhere"
     ),
-    (_ANY_WORKFLOW, "declined"): DispositionResult("Declined", "Other"),
+    # Kalaam has no "Declined" status; a declined call is Not Interested / Other.
+    (_ANY_WORKFLOW, "declined"): DispositionResult("Not Interested", "Other"),
     # Cost Help
     (_ANY_WORKFLOW, "wants_cost_estimate"): DispositionResult(
-        "Cost Help", "Waiting Estimate"
+        "Cost Help", "Waiting estimate"
     ),
-    (_ANY_WORKFLOW, "wants_discount"): DispositionResult("Cost Help", "Discount Asked"),
+    (_ANY_WORKFLOW, "wants_discount"): DispositionResult("Cost Help", "Discount asked"),
     # Second opinion
     (_ANY_WORKFLOW, "wants_second_opinion"): DispositionResult(
-        "Wants Second Opinion", None
+        "Wants second opinion", None
     ),
-    # Waiting For Doctor Reports
+    # Waiting for doctor / reports
     (_ANY_WORKFLOW, "waiting_doctor_confirmation"): DispositionResult(
-        "Waiting For Doctor Reports", "Doctor OK Pending"
+        "Waiting for doctor / reports", "Doctor OK pending"
     ),
     (_ANY_WORKFLOW, "waiting_reports"): DispositionResult(
-        "Waiting For Doctor Reports", "Report Pending"
+        "Waiting for doctor / reports", "Report pending"
     ),
     (_ANY_WORKFLOW, "waiting_referral_letter"): DispositionResult(
         "Waiting for Referral Letter", None
     ),
     # IPD finance / clearance
     (_ANY_WORKFLOW, "insurance_concern"): DispositionResult(
-        "Insurance Loan Pending", "Insurance Approval Pending"
+        "Insurance / Loan pending", "Insurance approval pending"
     ),
     (_ANY_WORKFLOW, "loan_required"): DispositionResult(
-        "Insurance Loan Pending", "Loan Approval Pending"
+        "Insurance / Loan pending", "Loan approval pending"
     ),
     (_ANY_WORKFLOW, "on_medications"): DispositionResult("On Medications", None),
     (_ANY_WORKFLOW, "medical_clearance_pending"): DispositionResult(
-        "Medical clearance pending", None
+        "Medical Clearance Pending", None
     ),
     # Follow Up
     (_ANY_WORKFLOW, "follow_up"): DispositionResult("Follow Up", None),
     (_ANY_WORKFLOW, "call_dropped"): DispositionResult("Follow Up", None),
     # Not connected
-    (_ANY_WORKFLOW, "not_connected"): DispositionResult("Couldn't reach", "Busy"),
+    (_ANY_WORKFLOW, "not_connected"): DispositionResult("Couldn't Reach", "Busy"),
     # Kept outside the client doc: escalation (patient safety) and no_output
     # (connected but nothing usable — distinct from a non-connect).
     (_ANY_WORKFLOW, "escalation"): DispositionResult("Escalation", None),
