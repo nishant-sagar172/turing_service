@@ -1055,7 +1055,7 @@ X-Admin-Key: your-admin-secret</pre>
           <tr><td><code>medical_clearance_pending</code> <span class="field-type">ipd</span></td><td>Needs fitness or clearance from another specialist</td><td>Medical Clearance Pending</td><td><em>null</em></td></tr>
           <tr><td><code>follow_up</code></td><td>Patient actively asks to be contacted again, or is undecided without refusing</td><td>Follow Up</td><td><em>null</em></td></tr>
           <tr><td><code>call_dropped</code></td><td>Real conversation happened but the call ended abruptly with no conclusion</td><td>Follow Up</td><td><em>null</em></td></tr>
-          <tr><td><code>no_output</code></td><td>Connected but no meaningful interaction — wrong number, voicemail, dead air, immediate hangup</td><td>No Output</td><td><em>null</em></td></tr>
+          <tr><td><code>no_output</code></td><td>Connected but no meaningful interaction — wrong number, voicemail, dead air, immediate hangup</td><td>Follow Up</td><td><em>null</em></td></tr>
           <tr><td><code>not_connected</code></td><td>Call never connected. Auto-assigned without an LLM call</td><td>Couldn't Reach</td><td>Busy</td></tr>
         </tbody>
       </table>
@@ -1249,10 +1249,9 @@ curl -X POST https://your-domain:8005/v1/batches/{batch_id}/schedule \
       "Booking": {"count": 244, "pct_of_analyzed": 0.287},
       "Visited": {"count": 96, "pct_of_analyzed": 0.113},
       "Cost Help": {"count": 80, "pct_of_analyzed": 0.0941},
-      "Follow Up": {"count": 192, "pct_of_analyzed": 0.226},
+      "Follow Up": {"count": 234, "pct_of_analyzed": 0.2754},
       "Escalation": {"count": 85, "pct_of_analyzed": 0.1},
       "Not Interested": {"count": 51, "pct_of_analyzed": 0.06},
-      "No Output": {"count": 42, "pct_of_analyzed": 0.0494},
       "Couldn't Reach": {"count": 60, "pct_of_analyzed": 0.0706}
     }
   },
@@ -1279,10 +1278,9 @@ curl -X POST https://your-domain:8005/v1/batches/{batch_id}/schedule \
           <tr><td>Insurance / Loan pending <span class="field-type">ipd</span></td><td><code>insurance_concern</code>, <code>loan_required</code></td></tr>
           <tr><td>On Medications <span class="field-type">ipd</span></td><td><code>on_medications</code></td></tr>
           <tr><td>Medical Clearance Pending <span class="field-type">ipd</span></td><td><code>medical_clearance_pending</code></td></tr>
-          <tr><td>Follow Up</td><td><code>follow_up</code>, <code>call_dropped</code></td></tr>
+          <tr><td>Follow Up</td><td><code>follow_up</code>, <code>call_dropped</code>, <code>no_output</code></td></tr>
           <tr><td>Not Interested</td><td><code>declined</code>, <code>done_elsewhere</code></td></tr>
           <tr><td>Escalation</td><td><code>escalation</code></td></tr>
-          <tr><td>No Output</td><td><code>no_output</code></td></tr>
           <tr><td>Couldn't Reach</td><td><code>not_connected</code></td></tr>
         </tbody>
       </table>
@@ -1310,7 +1308,7 @@ curl -X POST https://your-domain:8005/v1/batches/{batch_id}/schedule \
   },
   "by_disposition_status": {
     "Booking": 31, "Visited": 9, "Escalation": 8, "Not Interested": 6,
-    "No Output": 5, "Follow Up": 19, "Couldn't Reach": 30
+    "Follow Up": 24, "Couldn't Reach": 30
   }
 }</pre>
   </section>
@@ -1581,7 +1579,7 @@ def verify_signature(body: bytes, secret: str, signature: str) -> bool:
         <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
         <tbody>
           <tr><td><code>call_outcome</code></td><td class="field-type">string | null</td><td>Granular outcome — see <a href="#calls">Call Outcomes and Disposition Mapping</a></td></tr>
-          <tr><td><code>disposition_status</code></td><td class="field-type">string | null</td><td>Business status derived from <code>call_outcome</code> — e.g. Booking, Visited, Cost Help, Waiting for doctor / reports, Follow Up, Not Interested, Escalation, No Output, Couldn't Reach. See the <a href="#calls">mapping table</a></td></tr>
+          <tr><td><code>disposition_status</code></td><td class="field-type">string | null</td><td>Business status derived from <code>call_outcome</code> — e.g. Booking, Visited, Cost Help, Waiting for doctor / reports, Follow Up, Not Interested, Escalation, Couldn't Reach. See the <a href="#calls">mapping table</a></td></tr>
           <tr><td><code>sub_status</code></td><td class="field-type">string | null</td><td>Sub-classification within the disposition status</td></tr>
           <tr><td><code>workflow_code</code></td><td class="field-type">string | null</td><td><code>opd</code>, <code>ipd</code>, <code>cancer_workflow</code> or <code>gynae_workflow</code> — determines the available outcome set</td></tr>
           <tr><td><code>summary</code></td><td class="field-type">string | null</td><td>Brief summary of the call</td></tr>
