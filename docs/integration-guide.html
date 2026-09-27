@@ -765,7 +765,7 @@ X-Admin-Key: your-admin-secret</pre>
             <tr><td><code>analysis_llm_model</code></td><td class="field-type">string | null</td><td>Model override. Defaults to <code>gpt-5.6-luna</code> (openai) or <code>claude-haiku-4-5-20251001</code> (anthropic)</td></tr>
             <tr><td><code>analysis_prompt_hint</code></td><td class="field-type">string | null</td><td>Custom prompt hint appended to analysis</td></tr>
             <tr><td><code>analysis_llm_api_key</code></td><td class="field-type">string | null</td><td>Write-only. Client's own LLM API key, encrypted at rest. Requires <code>ENCRYPTION_KEY</code> on the server — returns 503 if unset. Reads expose only <code>analysis_llm_api_key_set</code> (boolean)</td></tr>
-            <tr><td><code>default_workflow_code</code></td><td class="field-type">string | null</td><td>Fallback workflow for batches that do not set one: <code>opd</code>, <code>ipd</code>, <code>cancer_workflow</code> or <code>gynae_workflow</code></td></tr>
+            <tr><td><code>default_workflow_code</code></td><td class="field-type">string | null</td><td>Fallback workflow for calls and batches that do not set one: <code>opd</code>, <code>ipd</code>, <code>cancer_workflow</code> or <code>gynae_workflow</code></td></tr>
           </tbody>
         </table>
       </div>
@@ -1005,18 +1005,21 @@ X-Admin-Key: your-admin-secret</pre>
     </div>
 
     <h4>Workflows</h4>
-    <p><code>workflow_code</code> is <strong>always optional</strong>. A batch that omits it falls back to the client's <code>default_workflow_code</code>, and then to <code>opd</code> — campaigns run and classify normally either way. It only decides which call outcomes the classifier may assign.</p>
-    <p>Codes mirror Kalaam's <code>workflows.workflow_code</code>. Set it per batch (<code>workflow_code</code> on <code>POST /v1/batches</code> or <code>POST /v1/batches/upload</code>) or per client (<code>default_workflow_code</code> in client config). Single calls carry no batch, so the client default is their only source.</p>
+    <p><code>workflow_code</code> is <strong>always optional</strong>. Turing resolves it per call in this order: the call&rsquo;s own <code>workflow_code</code> (<code>POST /v1/calls</code>) &rarr; its batch&rsquo;s <code>workflow_code</code> (<code>POST /v1/batches</code> or <code>/v1/batches/upload</code>) &rarr; the client&rsquo;s <code>default_workflow_code</code> &rarr; <code>opd</code>. It decides which call outcomes the classifier may assign, and which Call-Outcome guide table applies.</p>
+    <p>Codes mirror Kalaam&rsquo;s <code>workflows.workflow_code</code>. Kalaam sets the patient&rsquo;s status from the returned <code>call_outcome</code> + <code>workflow_code</code> using its own status codes.</p>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>workflow_code</th><th>Description</th></tr></thead>
+        <thead><tr><th>workflow_code</th><th>Guide table</th><th>Outcomes the classifier may assign</th><th>Kalaam sends it for</th></tr></thead>
         <tbody>
-          <tr><td><code>opd</code></td><td>Out-patient follow-ups, appointment reminders, check-ins. Used when nothing is set</td></tr>
-          <tr><td><code>ipd</code></td><td>In-patient admission coordination. Unlocks finance and clearance outcomes (insurance, loan, medications, reports, clearance, referral letter)</td></tr>
-          <tr><td><code>cancer_workflow</code></td><td>Oncology pathways. Currently shares the common outcome set — registered so campaigns can be tagged and reported on</td></tr>
-          <tr><td><code>gynae_workflow</code></td><td>Gynaecology pathways. Currently shares the common outcome set</td></tr>
+          <tr><td><code>opd</code></td><td>Other Tasks</td><td>The Other Tasks outcomes</td><td>OPD patients (any task except IP admission); IPD patients on non-admission tasks (follow-up, lab test, medication, procedure, radiology test, referral); an unrecognised workflow. Also Turing&rsquo;s default when nothing is set</td></tr>
+          <tr><td><code>ipd</code></td><td>IPD Admission Tasks</td><td>The Other Tasks outcomes <strong>plus</strong> insurance, loan, on medications, waiting for reports, medical clearance</td><td>An IP-admission task in any workflow (OPD, IPD or gynae)</td></tr>
+          <tr><td><code>gynae_workflow</code></td><td>Other Tasks</td><td>The Other Tasks outcomes</td><td>Gynae patients on non-admission tasks</td></tr>
+          <tr><td><code>cancer_workflow</code></td><td>Other Tasks</td><td>The Other Tasks outcomes</td><td>Cancer patients</td></tr>
         </tbody>
       </table>
+    </div>
+    <div class="callout callout-info">
+      <strong>Only <code>done_elsewhere</code> differs by workflow:</strong> <em>Not Interested / Admitted Elsewhere</em> for <code>ipd</code>, <em>Not Interested / Done Elsewhere</em> for the rest. The guide is the specification; if a hospital&rsquo;s Kalaam workflow does not have a mapped status set up, Kalaam leaves the status unchanged and logs <code>skipped_invalid_status</code>. Kalaam&rsquo;s auto-call path sends the patient&rsquo;s workflow as-is rather than applying the task rule above.
     </div>
 
     <p>The list is served from the API so it stays in step with the backend:</p>
