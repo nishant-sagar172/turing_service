@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from app.middleware import _OPEN_PATHS
+from app.middleware import _OPEN_PATHS, AuthMiddleware
 from app.routers import dates as dates_router
 from app.schemas.dates import DateResolveRequest, DateResolveResponse
 from app.services.date_resolver import COUNTRY_RULES, resolve_date
@@ -347,3 +347,128 @@ def test_weekday_matches_zeller_for_every_date_2024_to_2046() -> None:
             mismatches.append(current.isoformat())
         current += timedelta(days=1)
     assert mismatches == []
+
+
+# --- extension: bounds, horizon, edge cases, country, auth -------------------
+
+
+def _post(body: dict[str, Any]) -> Any:
+    return _client().post("/v1/dates/resolve", json=body)
+
+
+@pytest.mark.parametrize("from_date", ["9999-12-31", "1999-12-31", "2101-01-01"])
+def test_from_date_outside_2000_2100_is_rejected(from_date: str) -> None:
+    body = {"kind": "days_from_date", "from_date": from_date, "days": 1}
+    with pytest.raises(ValidationError):
+        DateResolveRequest.model_validate(body)
+    assert _post(body).status_code == 422
+
+
+@pytest.mark.parametrize("from_date", ["2000-01-01", "2100-12-31"])
+def test_from_date_bounds_are_inclusive(from_date: str) -> None:
+    req = DateResolveRequest.model_validate(
+        {"kind": "days_from_date", "from_date": from_date, "days": 1}
+    )
+    assert req.from_date == date.fromisoformat(from_date)
+
+
+def test_days_from_date_beyond_horizon_is_too_far() -> None:
+    res = _resolve({"kind": "days_from_date", "from_date": "2027-11-27", "days": 366})
+    assert res.resolved is not None
+    assert _ymd(res.resolved) == "2028-11-27"
+    assert res.allowed is False
+    assert res.reason == "too_far"
+
+
+def test_days_from_today_365_is_last_open_day() -> None:
+    res = _resolve({"kind": "days_from_today", "days": 365})
+    assert res.resolved is not None
+    assert _ymd(res.resolved) == "2027-11-27"
+    assert res.allowed is True
+
+
+def test_days_from_today_366_is_closed_with_backward_alternative_only() -> None:
+    res = _resolve({"kind": "days_from_today", "days": 366})
+    assert res.resolved is not None
+    assert _ymd(res.resolved) == "2027-11-28"
+    assert res.resolved.weekday == "Sunday"
+    assert res.reason == "closed_day"
+    assert [_ymd(a) for a in res.alternatives] == ["2027-11-27"]
+
+
+def test_closed_tomorrow_when_today_is_saturday_has_only_forward_alternative() -> None:
+    res = _resolve({"kind": "days_from_today", "days": 1}, SATURDAY_NOW)
+    assert res.resolved is not None
+    assert _ymd(res.resolved) == "2026-11-29"
+    assert res.reason == "closed_day"
+    assert [_ymd(a) for a in res.alternatives] == ["2026-11-30"]
+
+
+def test_weekday_occurrence_8_is_seven_weeks_after_first() -> None:
+    res = _resolve({"kind": "weekday", "weekday": "saturday", "occurrence": 8})
+    assert res.resolved is not None
+    assert _ymd(res.resolved) == "2027-01-16"
+    assert len(res.candidates) == 3
+
+
+def test_weekday_occurrence_9_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        DateResolveRequest.model_validate(
+            {"kind": "weekday", "weekday": "saturday", "occurrence": 9}
+        )
+
+
+def test_leap_day_next_leap_year_is_too_far() -> None:
+    res = _resolve({"kind": "day_of_month", "day": 29, "month": 2})
+    assert res.resolved is not None
+    assert _ymd(res.resolved) == "2028-02-29"
+    assert res.reason == "too_far"
+
+
+def test_negative_days_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        DateResolveRequest.model_validate({"kind": "days_from_today", "days": -1})
+
+
+@pytest.mark.parametrize("country", [123, ["IN"], "ABCDEFGHI"])
+def test_bad_country_is_rejected(country: Any) -> None:
+    body = {"kind": "days_from_today", "days": 5, "country": country}
+    with pytest.raises(ValidationError):
+        DateResolveRequest.model_validate(body)
+    assert _post(body).status_code == 422
+
+
+@pytest.mark.parametrize("country", ["us", " US "])
+def test_route_unsupported_country_any_case(country: str) -> None:
+    resp = _post({"kind": "days_from_today", "days": 5, "country": country})
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error"] == "unsupported_country"
+
+
+@pytest.mark.parametrize("country", [None, "", "  "])
+def test_route_blank_country_is_india(country: str | None) -> None:
+    resp = _post({"kind": "days_from_today", "days": 5, "country": country})
+    assert resp.status_code == 200
+    assert resp.json()["country"] == "IN"
+
+
+@pytest.mark.parametrize("day", ["²", "9" * 5000])
+def test_hostile_day_values_are_422_not_500(day: str) -> None:
+    resp = _post({"kind": "day_of_month", "day": day})
+    assert resp.status_code == 422
+
+
+def test_real_auth_middleware_leaves_resolve_open_and_protects_others() -> None:
+    app = FastAPI()
+    app.add_middleware(AuthMiddleware)
+
+    @app.middleware("http")
+    async def _set_request_id(request: Any, call_next: Any) -> Any:
+        request.state.request_id = "test"
+        return await call_next(request)
+
+    app.include_router(dates_router.router, prefix="/v1")
+    client = TestClient(app)
+    ok = client.post("/v1/dates/resolve", json={"kind": "days_from_today", "days": 5})
+    assert ok.status_code == 200
+    assert client.get("/v1/calls").status_code == 401
