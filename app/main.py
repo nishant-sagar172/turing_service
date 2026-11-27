@@ -33,6 +33,7 @@ from app.routers import (
     batches,
     calls,
     claim,
+    dates,
     health,
     me,
     phone_numbers,
@@ -174,6 +175,7 @@ def create_app() -> FastAPI:
     app.include_router(phone_numbers.router, prefix="/v1")
     app.include_router(agents.router, prefix="/v1")
     app.include_router(workflows.router, prefix="/v1")
+    app.include_router(dates.router, prefix="/v1")
 
     try:
         from app.routers import sql_agent
