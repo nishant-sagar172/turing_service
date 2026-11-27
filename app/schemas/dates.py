@@ -18,7 +18,17 @@ _ZERO_MEANS_ABSENT = ("day", "month")
 _EMPTY_WORDS = frozenset({"", "none", "null", "n/a"})
 # Bolna leaves "%(name)s" in place when the variable was never filled.
 _PLACEHOLDER = re.compile(r"^%\(.*\)s$")
+_ZEROS = re.compile(r"0+", re.ASCII)
 
+WEEKDAYS = (
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
 _WEEKDAY_ALIASES = {
     "mon": "monday",
     "tue": "tuesday",
@@ -31,17 +41,6 @@ _WEEKDAY_ALIASES = {
     "sat": "saturday",
     "sun": "sunday",
 }
-_FULL_WEEKDAYS = frozenset(
-    {
-        "monday",
-        "tuesday",
-        "wednesday",
-        "thursday",
-        "friday",
-        "saturday",
-        "sunday",
-    }
-)
 _REQUIRED_BY_KIND = {
     "days_from_today": ("days",),
     "weekday": ("weekday",),
@@ -63,15 +62,14 @@ def _is_zero(value: Any) -> bool:
     if isinstance(value, bool):
         return False
     if isinstance(value, str):
-        value = value.strip()
-        return value.isdigit() and int(value) == 0
+        return _ZEROS.fullmatch(value.strip()) is not None
     return isinstance(value, int) and value == 0
 
 
 class DateResolveRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    country: str = DEFAULT_COUNTRY
+    country: str = Field(default=DEFAULT_COUNTRY, max_length=8)
     kind: Literal["days_from_today", "weekday", "day_of_month", "days_from_date"]
     days: int | None = Field(default=None, ge=0, le=366)
     weekday: str | None = None
@@ -101,9 +99,11 @@ class DateResolveRequest(BaseModel):
     @field_validator("country", mode="before")
     @classmethod
     def _normalise_country(cls, value: Any) -> Any:
-        if not isinstance(value, str) or not value.strip():
+        if value is None:
             return DEFAULT_COUNTRY
-        return value.strip().upper()
+        if not isinstance(value, str):
+            return value
+        return value.strip().upper() or DEFAULT_COUNTRY
 
     @field_validator("weekday", mode="before")
     @classmethod
@@ -114,9 +114,16 @@ class DateResolveRequest(BaseModel):
             raise ValueError("weekday must be an English weekday name")
         text = value.strip().lower()
         text = _WEEKDAY_ALIASES.get(text, text)
-        if text not in _FULL_WEEKDAYS:
+        if text not in WEEKDAYS:
             raise ValueError(f"unknown weekday: {value!r}")
         return text
+
+    @field_validator("from_date")
+    @classmethod
+    def _bound_from_date(cls, value: date | None) -> date | None:
+        if value is not None and not 2000 <= value.year <= 2100:
+            raise ValueError("from_date year out of range")
+        return value
 
     @model_validator(mode="after")
     def _require_fields_for_kind(self) -> Self:

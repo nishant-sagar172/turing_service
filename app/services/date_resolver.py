@@ -11,12 +11,12 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from app.schemas.dates import (
-    DEFAULT_COUNTRY,
     DateInfo,
     DateOption,
     DateReason,
     DateResolveRequest,
     DateResolveResponse,
+    WEEKDAYS,
 )
 
 
@@ -37,17 +37,6 @@ COUNTRY_RULES: dict[str, CountryRule] = {
     ),
 }
 
-__all__ = ["COUNTRY_RULES", "DEFAULT_COUNTRY", "CountryRule", "resolve_date"]
-
-_WEEKDAY_NAMES = (
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
-)
 _MONTH_NAMES = (
     "January",
     "February",
@@ -68,7 +57,7 @@ _CANDIDATE_COUNT = 3
 
 
 def _info(d: date) -> DateInfo:
-    weekday = _WEEKDAY_NAMES[d.weekday()]
+    weekday = WEEKDAYS[d.weekday()].capitalize()
     spoken = f"{weekday}, {d.day} {_MONTH_NAMES[d.month - 1]} {d.year}"
     return DateInfo(date=d, weekday=weekday, spoken=spoken)
 
@@ -156,7 +145,7 @@ def _message(
     resolved: DateInfo | None, reason: DateReason | None, alts: list[DateInfo]
 ) -> str:
     if resolved is None:
-        return "That date does not exist. Ask the patient for another date."
+        return "That date does not exist. Ask for another date."
     spoken = resolved.spoken
     if reason is None:
         return f"{spoken} is available."
@@ -179,7 +168,7 @@ def _target_date(
     if req.kind == "days_from_date" and req.from_date is not None:
         return req.from_date + timedelta(days=req.days or 0), False, []
     if req.kind == "weekday" and req.weekday is not None:
-        index = [n.lower() for n in _WEEKDAY_NAMES].index(req.weekday)
+        index = WEEKDAYS.index(req.weekday)
         count = max(req.occurrence, _CANDIDATE_COUNT)
         dates = _weekday_occurrences(today, index, count)
         candidates = [_option(d, today, rule) for d in dates[:_CANDIDATE_COUNT]]
