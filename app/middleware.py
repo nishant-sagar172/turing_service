@@ -100,6 +100,8 @@ _OPEN_PATHS = frozenset(
         # Static label list, no tenant data — the operator console reads it to
         # build its workflow dropdown without holding a tenant API key.
         "/v1/workflows",
+        # Pure date arithmetic, no tenant data; Bolna tools call it without a key.
+        "/v1/dates/resolve",
     }
 )
 # Prefix-matched open paths (startswith check — covers dynamic segments).
