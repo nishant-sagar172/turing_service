@@ -12,7 +12,7 @@ DEFAULT_COUNTRY = "IN"
 
 DateReason = Literal["too_soon", "too_far", "closed_day", "invalid_date"]
 
-_OPTIONAL_FIELDS = ("days", "weekday", "day", "month", "from_date")
+_OPTIONAL_FIELDS = ("days", "weekday", "day", "month", "from_date", "period")
 # 1-based fields: the Bolna tool sends 0 as a "not applicable" sentinel.
 _ZERO_MEANS_ABSENT = ("day", "month")
 _EMPTY_WORDS = frozenset({"", "none", "null", "n/a"})
@@ -41,9 +41,19 @@ _WEEKDAY_ALIASES = {
     "sat": "saturday",
     "sun": "sunday",
 }
+PERIODS = (
+    "this_week",
+    "next_week",
+    "week_after_next",
+    "month_start",
+    "month_middle",
+    "month_end",
+)
 _REQUIRED_BY_KIND = {
     "days_from_today": ("days",),
     "weekday": ("weekday",),
+    "weekday_of_month": ("weekday",),
+    "period": ("period",),
     "day_of_month": ("day",),
     "days_from_date": ("from_date", "days"),
 }
@@ -70,13 +80,21 @@ class DateResolveRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     country: str = Field(default=DEFAULT_COUNTRY, max_length=8)
-    kind: Literal["days_from_today", "weekday", "day_of_month", "days_from_date"]
+    kind: Literal[
+        "days_from_today",
+        "weekday",
+        "weekday_of_month",
+        "day_of_month",
+        "days_from_date",
+        "period",
+    ]
     days: int | None = Field(default=None, ge=0, le=366)
     weekday: str | None = None
     occurrence: int = Field(default=1, ge=1, le=8)
     day: int | None = Field(default=None, ge=1, le=31)
     month: int | None = Field(default=None, ge=1, le=12)
     from_date: date | None = None
+    period: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -116,6 +134,18 @@ class DateResolveRequest(BaseModel):
         text = _WEEKDAY_ALIASES.get(text, text)
         if text not in WEEKDAYS:
             raise ValueError(f"unknown weekday: {value!r}")
+        return text
+
+    @field_validator("period", mode="before")
+    @classmethod
+    def _normalise_period(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("period must be a text value")
+        text = value.strip().lower().replace(" ", "_").replace("-", "_")
+        if text not in PERIODS:
+            raise ValueError(f"unknown period: {value!r}")
         return text
 
     @field_validator("from_date")
