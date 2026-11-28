@@ -200,9 +200,7 @@ def _resolve_period(
     options: list[DateOption] = []
     for window in _period_days(req.period, today, req.month):
         options = [
-            _option(d, today, rule)
-            for d in window
-            if _reason(d, today, rule) is None
+            _option(d, today, rule) for d in window if _reason(d, today, rule) is None
         ]
         if options:
             break
