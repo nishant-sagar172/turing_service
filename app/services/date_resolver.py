@@ -7,7 +7,9 @@ rules.
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
+from collections.abc import Iterator
 from datetime import date, datetime, timedelta
 
 from app.schemas.dates import (
@@ -54,6 +56,10 @@ _MONTH_NAMES = (
 _YEARS_TO_SEARCH = 5
 _MONTHS_TO_SCAN = 12
 _CANDIDATE_COUNT = 3
+_WEEK_OFFSETS = {"this_week": 0, "next_week": 1, "week_after_next": 2}
+_MONTH_START_DAYS = (1, 7)
+_MONTH_MIDDLE_DAYS = (11, 20)
+_MONTH_END_LENGTH = 7  # "end of the month" = its last 7 days
 
 
 def _info(d: date) -> DateInfo:
@@ -141,6 +147,92 @@ def _resolve_day_of_month(
     return None, False
 
 
+def _nth_weekday(year: int, month: int, weekday_index: int, n: int) -> date | None:
+    first_weekday = date(year, month, 1).weekday()
+    day = 1 + (weekday_index - first_weekday) % 7 + 7 * (n - 1)
+    return _safe_date(year, month, day)
+
+
+def _months_from(today: date, month: int | None) -> Iterator[tuple[int, int]]:
+    """(year, month) pairs from this month on, for a year ahead (or the named month)."""
+    for offset in range(_MONTHS_TO_SCAN + 1):
+        index = today.month - 1 + offset
+        year, month_number = today.year + index // 12, index % 12 + 1
+        if month is None or month == month_number:
+            yield year, month_number
+
+
+def _resolve_weekday_of_month(
+    today: date, weekday_index: int, n: int, month: int | None
+) -> tuple[date | None, bool]:
+    """e.g. the third Friday of the month; date is None when none exists."""
+    for year, month_number in _months_from(today, month):
+        found = _nth_weekday(year, month_number, weekday_index, n)
+        if found is not None and found >= today:
+            return found, month is None and month_number != today.month
+    return None, False
+
+
+def _period_days(period: str, today: date, month: int | None) -> list[list[date]]:
+    """Day windows for a period, soonest first (one window for a week)."""
+    if period in _WEEK_OFFSETS:
+        monday = today - timedelta(days=today.weekday())
+        start = monday + timedelta(days=7 * _WEEK_OFFSETS[period])
+        return [[start + timedelta(days=i) for i in range(7)]]
+    windows = []
+    for year, month_number in _months_from(today, month):
+        last = calendar.monthrange(year, month_number)[1]
+        if period == "month_start":
+            first, end = _MONTH_START_DAYS
+        elif period == "month_middle":
+            first, end = _MONTH_MIDDLE_DAYS
+        else:
+            first, end = last - _MONTH_END_LENGTH + 1, last
+        windows.append([date(year, month_number, d) for d in range(first, end + 1)])
+    return windows
+
+
+def _resolve_period(
+    req: DateResolveRequest, today: date, rule: CountryRule
+) -> DateResolveResponse:
+    """A vague period: list the bookable days in it; the caller picks one."""
+    assert req.period is not None
+    options: list[DateOption] = []
+    for window in _period_days(req.period, today, req.month):
+        options = [
+            _option(d, today, rule)
+            for d in window
+            if _reason(d, today, rule) is None
+        ]
+        if options:
+            break
+    if req.period == "month_end":
+        options = options[-_CANDIDATE_COUNT:]
+    elif req.period not in _WEEK_OFFSETS:
+        options = options[:_CANDIDATE_COUNT]
+    if options:
+        listed = "; ".join(o.spoken for o in options)
+        return DateResolveResponse(
+            country=req.country,
+            today=_info(today),
+            allowed=True,
+            candidates=options,
+            message=f"Bookable days: {listed}. Ask which day the caller prefers.",
+        )
+    reason: DateReason = "too_soon" if req.period in _WEEK_OFFSETS else "invalid_date"
+    alts = _alternatives(today, "too_soon", today, rule) if reason == "too_soon" else []
+    return DateResolveResponse(
+        country=req.country,
+        today=_info(today),
+        allowed=False,
+        reason=reason,
+        alternatives=alts,
+        message=_message(None, reason, alts)
+        if reason == "invalid_date"
+        else "No bookable day left in that period. Ask the caller for another day.",
+    )
+
+
 def _message(
     resolved: DateInfo | None, reason: DateReason | None, alts: list[DateInfo]
 ) -> str:
@@ -173,6 +265,12 @@ def _target_date(
         dates = _weekday_occurrences(today, index, count)
         candidates = [_option(d, today, rule) for d in dates[:_CANDIDATE_COUNT]]
         return dates[req.occurrence - 1], False, candidates
+    if req.kind == "weekday_of_month" and req.weekday is not None:
+        index = WEEKDAYS.index(req.weekday)
+        found, rolled = _resolve_weekday_of_month(
+            today, index, req.occurrence, req.month
+        )
+        return found, rolled, []
     if req.day is not None:
         found, rolled = _resolve_day_of_month(today, req.day, req.month)
         return found, rolled, []
@@ -183,6 +281,8 @@ def resolve_date(
     req: DateResolveRequest, now_utc: datetime, rule: CountryRule
 ) -> DateResolveResponse:
     today = (now_utc + timedelta(minutes=rule.utc_offset_minutes)).date()
+    if req.kind == "period":
+        return _resolve_period(req, today, rule)
     target, rolled, candidates = _target_date(req, today, rule)
     if target is None:
         return DateResolveResponse(

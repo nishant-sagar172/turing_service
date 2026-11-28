@@ -472,3 +472,119 @@ def test_real_auth_middleware_leaves_resolve_open_and_protects_others() -> None:
     ok = client.post("/v1/dates/resolve", json={"kind": "days_from_today", "days": 5})
     assert ok.status_code == 200
     assert client.get("/v1/calls").status_code == 401
+
+
+# --- weekday_of_month and period ---------------------------------------------
+
+
+def _days(res: DateResolveResponse) -> list[str]:
+    return [_ymd(c) for c in res.candidates]
+
+
+def test_third_friday_of_month_rolls_when_this_months_has_passed() -> None:
+    res = _resolve({"kind": "weekday_of_month", "weekday": "friday", "occurrence": 3})
+    assert res.resolved is not None
+    assert _ymd(res.resolved) == "2026-12-18"
+    assert res.rolled_to_next_month is True
+
+
+def test_first_monday_of_named_month() -> None:
+    res = _resolve(
+        {"kind": "weekday_of_month", "weekday": "monday", "occurrence": 1, "month": 12}
+    )
+    assert res.resolved is not None
+    assert _ymd(res.resolved) == "2026-12-07"
+    assert res.allowed is True
+
+
+def test_weekday_of_month_that_does_not_exist_is_invalid() -> None:
+    # December 2026 has only four Fridays.
+    res = _resolve(
+        {"kind": "weekday_of_month", "weekday": "friday", "occurrence": 5, "month": 12}
+    )
+    assert res.resolved is None
+    assert res.allowed is False
+    assert res.reason == "invalid_date"
+
+
+def test_weekday_of_month_sunday_is_closed() -> None:
+    res = _resolve({"kind": "weekday_of_month", "weekday": "sunday", "month": 12})
+    assert res.allowed is False
+    assert res.reason == "closed_day"
+
+
+def test_next_week_lists_open_days_without_sunday() -> None:
+    res = _resolve({"kind": "period", "period": "next_week"})
+    assert res.resolved is None
+    assert res.allowed is True
+    assert _days(res) == [
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-05",
+    ]
+
+
+def test_this_week_skips_days_that_are_too_soon() -> None:
+    res = _resolve({"kind": "period", "period": "this_week"})  # Friday
+    assert _days(res) == ["2026-11-28"]
+
+
+def test_this_week_with_nothing_left_is_not_allowed() -> None:
+    res = _resolve({"kind": "period", "period": "this_week"}, SATURDAY_NOW)
+    assert res.allowed is False
+    assert res.reason == "too_soon"
+    assert [_ymd(a) for a in res.alternatives] == ["2026-11-30"]
+
+
+def test_week_after_next() -> None:
+    res = _resolve({"kind": "period", "period": "week after next"})
+    assert _days(res)[0] == "2026-12-07"
+
+
+def test_month_start_of_named_month_offers_first_three_open_days() -> None:
+    res = _resolve({"kind": "period", "period": "month_start", "month": 12})
+    assert _days(res) == ["2026-12-01", "2026-12-02", "2026-12-03"]
+
+
+def test_month_end_offers_last_open_days_of_current_month() -> None:
+    res = _resolve({"kind": "period", "period": "month_end"})
+    assert _days(res) == ["2026-11-28", "2026-11-30"]
+
+
+def test_month_end_of_future_month_offers_last_three_open_days() -> None:
+    res = _resolve({"kind": "period", "period": "month_end", "month": 12})
+    assert _days(res) == ["2026-12-29", "2026-12-30", "2026-12-31"]
+
+
+def test_month_middle_when_current_one_is_over_uses_next_month() -> None:
+    res = _resolve({"kind": "period", "period": "month_middle"}, SATURDAY_NOW)
+    assert _days(res) == ["2026-12-11", "2026-12-12", "2026-12-14"]
+
+
+def test_period_and_weekday_of_month_requirements() -> None:
+    for body in (
+        {"kind": "period"},
+        {"kind": "period", "period": "someday"},
+        {"kind": "weekday_of_month"},
+    ):
+        with pytest.raises(ValidationError):
+            DateResolveRequest.model_validate(body)
+
+
+def test_period_placeholder_and_sentinels_from_bolna_are_tolerated() -> None:
+    req = DateResolveRequest.model_validate(
+        {
+            "kind": "weekday_of_month",
+            "weekday": "Friday",
+            "occurrence": "3",
+            "day": "0",
+            "month": "0",
+            "days": "0",
+            "period": "none",
+            "from_date": "none",
+        }
+    )
+    assert req.period is None and req.month is None and req.occurrence == 3
